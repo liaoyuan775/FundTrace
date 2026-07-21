@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 from time import perf_counter
-from app.analysis import build_graph
+from app.analysis.core import build_graph
 from app.models import TransactionRecord
 
 records=[]

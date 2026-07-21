@@ -1,7 +1,7 @@
 from fastapi.testclient import TestClient
 from app.config import Settings
 from app.main import create_app
-from app.demo import demo_transactions
+from app.demo.data import demo_transactions
 from app.config import Settings
 from app.models import TransactionRecord
 
@@ -76,8 +76,8 @@ def test_parse_material_reports_failed_model_chunks(tmp_path, monkeypatch):
     assert uploaded.status_code == 201
     file_id = uploaded.json()[0]["file_id"]
 
-    monkeypatch.setattr("app.main.extract_material", lambda *_: [{"text": "一笔流水"}])
-    monkeypatch.setattr("app.qwen.QwenAdapter.normalize", lambda *_: (_ for _ in ()).throw(RuntimeError("model unavailable")))
+    monkeypatch.setattr("app.api.routes.extract_material", lambda *_: [{"text": "一笔流水"}])
+    monkeypatch.setattr("app.ai.qwen.QwenAdapter.normalize", lambda *_: (_ for _ in ()).throw(RuntimeError("model unavailable")))
 
     response = api.post(f"/api/cases/{case_id}/materials/{file_id}/parse?use_model=true")
 
@@ -123,11 +123,11 @@ def test_failed_reparse_keeps_previous_source_drafts(tmp_path, monkeypatch):
         files=[("files", ("statement.png", b"image", "image/png"))],
     )
     file_id = upload.json()[0]["file_id"]
-    monkeypatch.setattr("app.main.extract_material", lambda *_: [{"text": "", "image_path": "unused.png", "region": [0, 0, 1, 1]}])
+    monkeypatch.setattr("app.api.routes.extract_material", lambda *_: [{"text": "", "image_path": "unused.png", "region": [0, 0, 1, 1]}])
     model_record = TransactionRecord(transaction_time="2026-07-17T10:00:00", serial_number="T1", payer_account="1", payer_name="甲", payee_account="2", payee_name="乙", amount=100)
-    monkeypatch.setattr("app.qwen.QwenAdapter.normalize", lambda *_: [model_record])
+    monkeypatch.setattr("app.ai.qwen.QwenAdapter.normalize", lambda *_: [model_record])
     first = api.post(f"/api/cases/{case_id}/materials/{file_id}/parse?use_model=true")
-    monkeypatch.setattr("app.qwen.QwenAdapter.normalize", lambda *_: (_ for _ in ()).throw(RuntimeError("temporary failure")))
+    monkeypatch.setattr("app.ai.qwen.QwenAdapter.normalize", lambda *_: (_ for _ in ()).throw(RuntimeError("temporary failure")))
 
     second = api.post(f"/api/cases/{case_id}/materials/{file_id}/parse?use_model=true")
     drafts = api.get(f"/api/cases/{case_id}/draft-transactions").json()
@@ -173,14 +173,14 @@ def test_docx_batch_records_receive_table_and_row_evidence(tmp_path, monkeypatch
     )
     file_id = upload.json()[0]["file_id"]
     monkeypatch.setattr(
-        "app.main.extract_material",
+        "app.api.routes.extract_material",
         lambda *_: [{"text": "table", "table_number": 2, "row_evidence": [
             {"row_number": 2, "text": "T2\t2\t3\t200"},
             {"row_number": 3, "text": "T1\t1\t2\t100"},
         ]}],
     )
     monkeypatch.setattr(
-        "app.qwen.QwenAdapter.normalize",
+        "app.ai.qwen.QwenAdapter.normalize",
         lambda *_: [
             TransactionRecord(transaction_time="2026-07-17T10:00:00", serial_number="T1", payer_account="1", payer_name="甲", payee_account="2", payee_name="乙", amount=100),
             TransactionRecord(transaction_time="2026-07-17T10:01:00", serial_number="T2", payer_account="2", payer_name="乙", payee_account="3", payee_name="丙", amount=200),

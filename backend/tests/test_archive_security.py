@@ -1,6 +1,6 @@
 import zipfile
 import pytest
-from app.parsers import UnsafeArchiveError, safe_extract_rar, safe_extract_zip
+from app.parsing.extractors import UnsafeArchiveError, safe_extract_rar, safe_extract_zip
 
 
 def test_zip_path_traversal_is_rejected(tmp_path):
@@ -55,6 +55,6 @@ def test_rar_path_traversal_is_rejected_before_member_is_opened(tmp_path, monkey
             self.opened = True
             raise AssertionError("unsafe member must not be opened")
 
-    monkeypatch.setattr("app.parsers.rarfile.RarFile", Archive)
+    monkeypatch.setattr("app.parsing.extractors.rarfile.RarFile", Archive)
     with pytest.raises(UnsafeArchiveError):
         safe_extract_rar(tmp_path / "unsafe.rar", tmp_path / "out")

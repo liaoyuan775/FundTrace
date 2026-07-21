@@ -1,0 +1,180 @@
+{
+  "passed": true,
+  "case_id": "CASE-F2C37E2999",
+  "upload_count": 10,
+  "draft_count": 135,
+  "canonical_count": 120,
+  "duplicate_group_count": 15,
+  "conflict_count": 0,
+  "evidence_location_count": 135,
+  "version_record_count": 120,
+  "false_positive_count": 0,
+  "format_metrics": {
+    ".csv": {
+      "expected": 30,
+      "correct": 30,
+      "missing": 0,
+      "mismatched": 0,
+      "extra": 0,
+      "accuracy": 1.0
+    },
+    ".xlsx": {
+      "expected": 35,
+      "correct": 35,
+      "missing": 0,
+      "mismatched": 0,
+      "extra": 0,
+      "accuracy": 1.0
+    },
+    ".pdf": {
+      "expected": 25,
+      "correct": 25,
+      "missing": 0,
+      "mismatched": 0,
+      "extra": 0,
+      "accuracy": 1.0
+    },
+    ".docx": {
+      "expected": 25,
+      "correct": 25,
+      "missing": 0,
+      "mismatched": 0,
+      "extra": 0,
+      "accuracy": 1.0
+    },
+    ".png": {
+      "expected": 10,
+      "correct": 10,
+      "missing": 0,
+      "mismatched": 0,
+      "extra": 0,
+      "accuracy": 1.0
+    },
+    ".jpg": {
+      "expected": 10,
+      "correct": 10,
+      "missing": 0,
+      "mismatched": 0,
+      "extra": 0,
+      "accuracy": 1.0
+    }
+  },
+  "graph": {
+    "actual": {
+      "node_count": 32,
+      "edge_count": 112,
+      "transaction_count": 120,
+      "total_amount": 2928760.0
+    },
+    "expected": {
+      "node_count": 32,
+      "edge_count": 112,
+      "transaction_count": 120,
+      "total_amount": 2928760.0
+    }
+  },
+  "materials": [
+    {
+      "filename": "01_甲银行账户流水.csv",
+      "suffix": ".csv",
+      "status": "parsed",
+      "draft_count": 20,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "filename": "02_乙银行交易明细.xlsx",
+      "suffix": ".xlsx",
+      "status": "parsed",
+      "draft_count": 20,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "filename": "03_丙银行电子流水.pdf",
+      "suffix": ".pdf",
+      "status": "parsed",
+      "draft_count": 15,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "filename": "04_丁银行调证材料.docx",
+      "suffix": ".docx",
+      "status": "parsed",
+      "draft_count": 15,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "filename": "05_手机银行转账记录.png",
+      "suffix": ".png",
+      "status": "parsed",
+      "draft_count": 10,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "filename": "06_聚合支付平台明细.xlsx",
+      "suffix": ".xlsx",
+      "status": "parsed",
+      "draft_count": 15,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "filename": "07_三方支付账单截图.jpg",
+      "suffix": ".jpg",
+      "status": "parsed",
+      "draft_count": 10,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "filename": "08_公安调取流水汇总.csv",
+      "suffix": ".csv",
+      "status": "parsed",
+      "draft_count": 10,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "filename": "09_戊银行流水证明.pdf",
+      "suffix": ".pdf",
+      "status": "parsed",
+      "draft_count": 10,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": []
+    },
+    {
+      "filename": "10_案件资金流转摘录.docx",
+      "suffix": ".docx",
+      "status": "parsed",
+      "draft_count": 10,
+      "error_count": 0,
+      "warning_count": 0,
+      "errors": [],
+      "warnings": []
+    }
+  ],
+  "mismatch_details": [],
+  "failures": []
+}

@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from app.analysis import attribute_mixed_funds, build_graph, count_rapid_transfers, trace_network
+from app.analysis.core import attribute_mixed_funds, build_graph, count_rapid_transfers, trace_network
 from app.models import TransactionRecord
 
 

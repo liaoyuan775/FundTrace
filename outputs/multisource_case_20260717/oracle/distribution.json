@@ -1,0 +1,217 @@
+[
+  {
+    "filename": "01_甲银行账户流水.csv",
+    "format": "csv",
+    "transaction_ids": [
+      "FT0001",
+      "FT0002",
+      "FT0003",
+      "FT0004",
+      "FT0005",
+      "FT0006",
+      "FT0007",
+      "FT0008",
+      "FT0009",
+      "FT0010",
+      "FT0011",
+      "FT0012",
+      "FT0013",
+      "FT0014",
+      "FT0015",
+      "FT0016",
+      "FT0017",
+      "FT0018",
+      "FT0023",
+      "FT0040"
+    ],
+    "unique_source_count": 18,
+    "duplicate_appearance_count": 2
+  },
+  {
+    "filename": "02_乙银行交易明细.xlsx",
+    "format": "xlsx",
+    "transaction_ids": [
+      "FT0019",
+      "FT0020",
+      "FT0021",
+      "FT0022",
+      "FT0023",
+      "FT0024",
+      "FT0025",
+      "FT0026",
+      "FT0027",
+      "FT0028",
+      "FT0029",
+      "FT0030",
+      "FT0031",
+      "FT0032",
+      "FT0033",
+      "FT0034",
+      "FT0035",
+      "FT0036",
+      "FT0053",
+      "FT0070"
+    ],
+    "unique_source_count": 18,
+    "duplicate_appearance_count": 2
+  },
+  {
+    "filename": "03_丙银行电子流水.pdf",
+    "format": "pdf",
+    "transaction_ids": [
+      "FT0037",
+      "FT0038",
+      "FT0039",
+      "FT0040",
+      "FT0041",
+      "FT0042",
+      "FT0043",
+      "FT0044",
+      "FT0045",
+      "FT0046",
+      "FT0047",
+      "FT0048",
+      "FT0049",
+      "FT0050",
+      "FT0032"
+    ],
+    "unique_source_count": 14,
+    "duplicate_appearance_count": 1
+  },
+  {
+    "filename": "04_丁银行调证材料.docx",
+    "format": "docx",
+    "transaction_ids": [
+      "FT0051",
+      "FT0052",
+      "FT0053",
+      "FT0054",
+      "FT0055",
+      "FT0056",
+      "FT0057",
+      "FT0058",
+      "FT0059",
+      "FT0060",
+      "FT0061",
+      "FT0062",
+      "FT0063",
+      "FT0064",
+      "FT0045"
+    ],
+    "unique_source_count": 14,
+    "duplicate_appearance_count": 1
+  },
+  {
+    "filename": "05_手机银行转账记录.png",
+    "format": "png",
+    "transaction_ids": [
+      "FT0065",
+      "FT0066",
+      "FT0067",
+      "FT0068",
+      "FT0069",
+      "FT0070",
+      "FT0071",
+      "FT0072",
+      "FT0073",
+      "FT0058"
+    ],
+    "unique_source_count": 9,
+    "duplicate_appearance_count": 1
+  },
+  {
+    "filename": "06_聚合支付平台明细.xlsx",
+    "format": "xlsx",
+    "transaction_ids": [
+      "FT0074",
+      "FT0075",
+      "FT0076",
+      "FT0077",
+      "FT0078",
+      "FT0079",
+      "FT0080",
+      "FT0081",
+      "FT0082",
+      "FT0083",
+      "FT0084",
+      "FT0085",
+      "FT0086",
+      "FT0071",
+      "FT0088"
+    ],
+    "unique_source_count": 13,
+    "duplicate_appearance_count": 2
+  },
+  {
+    "filename": "07_三方支付账单截图.jpg",
+    "format": "jpg",
+    "transaction_ids": [
+      "FT0087",
+      "FT0088",
+      "FT0089",
+      "FT0090",
+      "FT0091",
+      "FT0092",
+      "FT0093",
+      "FT0094",
+      "FT0095",
+      "FT0084"
+    ],
+    "unique_source_count": 9,
+    "duplicate_appearance_count": 1
+  },
+  {
+    "filename": "08_公安调取流水汇总.csv",
+    "format": "csv",
+    "transaction_ids": [
+      "FT0096",
+      "FT0097",
+      "FT0098",
+      "FT0099",
+      "FT0100",
+      "FT0101",
+      "FT0102",
+      "FT0103",
+      "FT0104",
+      "FT0114"
+    ],
+    "unique_source_count": 9,
+    "duplicate_appearance_count": 1
+  },
+  {
+    "filename": "09_戊银行流水证明.pdf",
+    "format": "pdf",
+    "transaction_ids": [
+      "FT0105",
+      "FT0106",
+      "FT0107",
+      "FT0108",
+      "FT0109",
+      "FT0110",
+      "FT0111",
+      "FT0112",
+      "FT0007",
+      "FT0024"
+    ],
+    "unique_source_count": 8,
+    "duplicate_appearance_count": 2
+  },
+  {
+    "filename": "10_案件资金流转摘录.docx",
+    "format": "docx",
+    "transaction_ids": [
+      "FT0113",
+      "FT0114",
+      "FT0115",
+      "FT0116",
+      "FT0117",
+      "FT0118",
+      "FT0119",
+      "FT0120",
+      "FT0003",
+      "FT0020"
+    ],
+    "unique_source_count": 8,
+    "duplicate_appearance_count": 2
+  }
+]
