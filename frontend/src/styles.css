@@ -367,7 +367,7 @@ button {
   height: 100%;
   display: grid;
   grid-template-columns: 232px minmax(450px, 1fr) 280px;
-  grid-template-rows: minmax(0, 1fr) 260px;
+  grid-template-rows: minmax(180px, var(--graph-height, 1fr)) 8px minmax(180px, 1fr);
 }
 .filters,
 .inspector {
@@ -601,6 +601,7 @@ button {
 }
 .raw-data {
   grid-column: 1/-1;
+  grid-row: 3;
   min-width: 0;
   min-height: 0;
   display: grid;
@@ -608,6 +609,19 @@ button {
   background: #f1efe8;
   color: #191d1b;
   border-top: 1px solid #555b58;
+}
+.analysis-splitter {
+  grid-column: 1/-1;
+  grid-row: 2;
+  border: 0;
+  background: #555b58;
+  cursor: row-resize;
+  touch-action: none;
+}
+.analysis-splitter:hover,
+.analysis-splitter:focus-visible {
+  background: var(--amber);
+  outline: 0;
 }
 .raw-head {
   padding: 0 12px;
@@ -716,6 +730,9 @@ button {
   .raw-data {
     grid-row: 2;
     grid-column: 1/-1;
+  }
+  .analysis-splitter {
+    display: none;
   }
   .case-switch {
     flex: 1;

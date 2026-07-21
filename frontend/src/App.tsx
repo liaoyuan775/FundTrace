@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BadgeCheck,
   BadgeDollarSign,
@@ -20,6 +20,7 @@ import {
   Upload,
 } from "lucide-react";
 import * as api from "./api";
+import { resizeAnalysisSplit } from "./analysis-split";
 import GraphCanvas from "./GraphCanvas";
 import type {
   CaseRecord,
@@ -720,6 +721,13 @@ type AnalysisProps = {
 function AnalysisView(p: AnalysisProps) {
   const update = (key: keyof api.Filters, value: string | number) =>
     p.setFilters((current) => ({ ...current, [key]: value }));
+  const [graphHeight, setGraphHeight] = useState(420);
+  const analysisLayout = useRef<HTMLDivElement>(null);
+  const resizeStart = useRef<{
+    y: number;
+    height: number;
+    maximum: number;
+  } | null>(null);
   const attributionResult = p.attributionData?.[p.attribution];
   const [traceEnd, setTraceEnd] = useState("");
   const [traceHops, setTraceHops] = useState(3);
@@ -728,7 +736,11 @@ function AnalysisView(p: AnalysisProps) {
   const riskLead = p.graph.nodes.find((node) => node.id === networkRisk.account_id);
   useEffect(() => setTraceResult(null), [p.selectedNode]);
   return (
-    <div className="analysis-layout">
+    <div
+      ref={analysisLayout}
+      className="analysis-layout"
+      style={{ "--graph-height": `${graphHeight}px` } as React.CSSProperties}
+    >
       <aside className="filters">
         <div className="panel-block">
           <span className="eyebrow">RISK ASSESSMENT</span>
@@ -1011,6 +1023,41 @@ function AnalysisView(p: AnalysisProps) {
           )}
         </div>
       </aside>
+      <button
+        className="analysis-splitter"
+        aria-label="调整拓扑图和转账数据高度"
+        onPointerDown={(event) => {
+          resizeStart.current = {
+            y: event.clientY,
+            height: graphHeight,
+            maximum: Math.max(
+              180,
+              (analysisLayout.current?.clientHeight || 0) - 188,
+            ),
+          };
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }}
+        onPointerMove={(event) => {
+          if (!resizeStart.current) return;
+          setGraphHeight(
+            resizeAnalysisSplit(
+              resizeStart.current.height,
+              event.clientY - resizeStart.current.y,
+              180,
+              resizeStart.current.maximum,
+            ),
+          );
+        }}
+        onPointerUp={() => {
+          resizeStart.current = null;
+        }}
+        onPointerCancel={() => {
+          resizeStart.current = null;
+        }}
+        onLostPointerCapture={() => {
+          resizeStart.current = null;
+        }}
+      />
       <section className="raw-data">
         <div className="raw-head">
           <b>原始转账数据</b>

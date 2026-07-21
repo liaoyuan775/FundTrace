@@ -24,6 +24,13 @@ test('renders every investigation workspace and raw transaction baseline', () =>
   expect(screen.getByText('新建案件')).toBeInTheDocument()
 })
 
+test('analysis exposes a separator for resizing the graph and transaction table', () => {
+  render(<App />)
+  expect(
+    screen.getByRole('button', { name: '调整拓扑图和转账数据高度' }),
+  ).toBeInTheDocument()
+})
+
 test('material action explicitly extracts and models transactions', async () => {
   render(<App />)
   fireEvent.click(screen.getAllByRole('button', { name: '材料接收' }).at(-1)!)

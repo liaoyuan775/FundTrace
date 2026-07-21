@@ -71,12 +71,12 @@ export default function GraphCanvas({
       },
       node: {
         state: {
-          selected: { stroke: "#fffdf7", lineWidth: 4, opacity: 1, shadowColor: "#fffdf7", shadowBlur: 18 },
+          selected: { stroke: "#fffdf7", lineWidth: 4, opacity: 1 },
           "incoming-neighbor": { stroke: "#59b7bf", lineWidth: 3, opacity: 1 },
           "outgoing-neighbor": { stroke: "#e4a72c", lineWidth: 3, opacity: 1 },
           "edge-endpoint": { stroke: "#f04438", lineWidth: 3, opacity: 1 },
-          "playing-source": { fill: "#e4a72c", stroke: "#fff7cf", lineWidth: 4, opacity: 1, shadowColor: "#e4a72c", shadowBlur: 24 },
-          "playing-target": { fill: "#f04438", stroke: "#fff7cf", lineWidth: 4, opacity: 1, shadowColor: "#f04438", shadowBlur: 24 },
+          "playing-source": { fill: "#e4a72c", stroke: "#fff7cf", lineWidth: 4, opacity: 1 },
+          "playing-target": { fill: "#f04438", stroke: "#fff7cf", lineWidth: 4, opacity: 1 },
           inactive: { opacity: 0.16 },
         },
       },
@@ -85,14 +85,14 @@ export default function GraphCanvas({
           selected: { stroke: "#f04438", lineWidth: 5, opacity: 1 },
           incoming: { stroke: "#59b7bf", lineWidth: 4, opacity: 1 },
           outgoing: { stroke: "#e4a72c", lineWidth: 4, opacity: 1 },
-          playing: { stroke: "#fff06a", lineWidth: 6, opacity: 1, shadowColor: "#fff06a", shadowBlur: 14 },
+          playing: { stroke: "#fff06a", lineWidth: 6, opacity: 1 },
           inactive: { opacity: 0.06 },
         },
       },
       layout:
         layout === "radial"
           ? { type: "radial", unitRadius: 90, preventOverlap: true }
-          : { type: "antv-dagre", rankdir: "LR", ranksep: 75, nodesep: 18 },
+          : { type: "antv-dagre", rankdir: "LR", ranksep: 110, nodesep: 34 },
       behaviors: [{ type: "drag-canvas" }, { type: "zoom-canvas", sensitivity: 1.4 }, "drag-element"],
       animation: false,
     };
