@@ -5,7 +5,8 @@ import App from './App'
 vi.mock('./api', () => ({
   bootstrapDemo: vi.fn().mockResolvedValue({ case_id: 'CASE-DEMO' }),
   listCases: vi.fn().mockResolvedValue([]),
-  getCase: vi.fn(), getGraph: vi.fn(), getTransactions: vi.fn(), listMaterials: vi.fn(), listVersions: vi.fn(), listSeeds: vi.fn(),
+  getCase: vi.fn(), getGraph: vi.fn(), getTransactions: vi.fn(), listMaterials: vi.fn().mockResolvedValue([{ file_id: 'FILE-1', original_name: 'flow.csv', size: 10, sha256: 'abc', duplicate: false, status: 'uploaded' }]), listVersions: vi.fn(), listSeeds: vi.fn(),
+  parseMaterial: vi.fn().mockResolvedValue({ material: { status: 'parsed', draft_count: 1 } }),
 }))
 vi.mock('./GraphCanvas', () => ({ default: () => <div data-testid="graph-canvas" /> }))
 
@@ -21,4 +22,10 @@ test('renders every investigation workspace and raw transaction baseline', () =>
   expect(screen.getByText('内部规则风险提示，不构成犯罪事实或司法认定。')).toBeInTheDocument()
   fireEvent.click(screen.getByRole('button', { name: '案件中心' }))
   expect(screen.getByText('新建案件')).toBeInTheDocument()
+})
+
+test('material action explicitly extracts and models transactions', async () => {
+  render(<App />)
+  fireEvent.click(screen.getAllByRole('button', { name: '材料接收' }).at(-1)!)
+  expect(await screen.findByRole('button', { name: /提取并建模/ })).toBeInTheDocument()
 })

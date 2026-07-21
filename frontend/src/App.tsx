@@ -277,8 +277,8 @@ export default function App() {
             onParse={async (id) => {
               setBusy(true);
               try {
-                await api.parseMaterial(caseId, id, false);
-                notify("材料提取完成，已进入校核流程");
+                const result: any = await api.parseMaterial(caseId, id, true);
+                notify(result.material.status === "failed" ? "材料建模失败，请查看错误" : `材料建模完成，生成 ${result.material.draft_count || 0} 笔草稿`);
                 await reload();
               } catch (e: any) {
                 notify(e.message);
@@ -528,7 +528,11 @@ function MaterialsView({
               </small>
             </div>
             <span className={`status ${m.status === "parsed" ? "ok" : ""}`}>
-              {m.duplicate
+              {m.status === "failed"
+                ? "建模失败"
+                : m.status === "partial"
+                  ? "部分成功"
+                  : m.duplicate
                 ? "重复材料"
                 : m.status === "parsed"
                   ? "已提取"
@@ -542,7 +546,7 @@ function MaterialsView({
               原始证据
             </a>
             <button className="command" onClick={() => onParse(m.file_id)}>
-              <FileSearch size={14} /> 提取内容
+              <FileSearch size={14} /> 提取并建模
             </button>
           </div>
         ))}

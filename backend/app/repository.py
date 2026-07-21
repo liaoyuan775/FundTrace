@@ -2,9 +2,12 @@ import csv
 import hashlib
 import json
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+from threading import RLock
 
+from .ingestion import canonical_records, group_duplicate_records
 from .models import CaseRecord, SeedRecord, TransactionRecord, VersionRecord
 
 
@@ -24,6 +27,7 @@ class FileRepository(Repository):
         self.root = Path(data_dir)
         self.cases_dir = self.root / "cases"
         self.cases_dir.mkdir(parents=True, exist_ok=True)
+        self._case_locks: defaultdict[str, RLock] = defaultdict(RLock)
 
     def case_dir(self, case_id: str) -> Path:
         path = self.cases_dir / case_id
@@ -64,29 +68,93 @@ class FileRepository(Repository):
 
     def save_drafts(self, case_id: str, records: list[TransactionRecord]) -> None:
         path = self.case_dir(case_id) / "drafts" / "transactions.jsonl"
-        path.write_text("\n".join(record.model_dump_json() for record in records) + ("\n" if records else ""), "utf-8")
+        temp = path.with_suffix(path.suffix + ".tmp")
+        temp.write_text("\n".join(record.model_dump_json() for record in records) + ("\n" if records else ""), "utf-8")
+        temp.replace(path)
 
     def add_draft(self, case_id: str, record: TransactionRecord) -> TransactionRecord:
-        records = self.list_drafts(case_id)
-        records.append(record)
-        self.save_drafts(case_id, records)
-        self.append_audit(case_id, {"event":"draft_created","transaction_id":record.transaction_id})
-        return record
+        return self.add_drafts(case_id, [record])[0]
+
+    def add_drafts(self, case_id: str, new_records: list[TransactionRecord]) -> list[TransactionRecord]:
+        with self._case_locks[case_id]:
+            records = group_duplicate_records(self.list_drafts(case_id) + new_records)
+            self.save_drafts(case_id, records)
+            created_ids = {record.transaction_id for record in new_records}
+            created = [record for record in records if record.transaction_id in created_ids]
+            self.append_audit(case_id, {"event":"drafts_created","count":len(created)})
+            return created
+
+    def replace_drafts_for_source(self, case_id: str, source_file_id: str, new_records: list[TransactionRecord]) -> list[TransactionRecord]:
+        return self.reconcile_drafts_for_source(case_id, source_file_id, new_records, replace_missing=True)
+
+    @staticmethod
+    def _source_identity(record: TransactionRecord) -> str:
+        source = record.source.model_dump(mode="json")
+        coordinates = json.dumps(source, ensure_ascii=False, sort_keys=True)
+        serial = "".join(character for character in record.serial_number.upper() if character.isalnum())
+        identity = serial or "|".join((
+            record.transaction_time.replace(microsecond=0).isoformat(),
+            record.payer_account,
+            record.payee_account,
+            f"{record.amount:.2f}",
+        ))
+        return f"{coordinates}|{identity}"
+
+    def reconcile_drafts_for_source(self, case_id: str, source_file_id: str, new_records: list[TransactionRecord], replace_missing: bool) -> list[TransactionRecord]:
+        with self._case_locks[case_id]:
+            current = self.list_drafts(case_id)
+            retained = [record for record in current if record.source.source_file_id != source_file_id]
+            previous = [record for record in current if record.source.source_file_id == source_file_id]
+            previous_by_identity: dict[str, list[TransactionRecord]] = defaultdict(list)
+            for record in previous:
+                previous_by_identity[self._source_identity(record)].append(record)
+            reconciled = []
+            matched_ids = set()
+            for record in new_records:
+                candidates = previous_by_identity.get(self._source_identity(record), [])
+                existing = candidates.pop(0) if candidates else None
+                if existing is None:
+                    reconciled.append(record)
+                    continue
+                matched_ids.add(existing.transaction_id)
+                if existing.review_status in {"confirmed", "conflict"} or existing.provenance == "human_confirmed":
+                    reconciled.append(existing)
+                else:
+                    reconciled.append(record.model_copy(update={
+                        "transaction_id": existing.transaction_id,
+                        "review_status": existing.review_status,
+                        "review_note": existing.review_note,
+                    }))
+            if not replace_missing:
+                reconciled.extend(record for record in previous if record.transaction_id not in matched_ids)
+            records = group_duplicate_records(retained + reconciled)
+            self.save_drafts(case_id, records)
+            current_ids = {record.transaction_id for record in reconciled[:len(new_records)]}
+            created = [record for record in records if record.transaction_id in current_ids]
+            self.append_audit(case_id, {
+                "event": "source_drafts_reconciled",
+                "source_file_id": source_file_id,
+                "count": len(created),
+                "replace_missing": replace_missing,
+            })
+            return created
 
     def update_draft(self, case_id: str, transaction_id: str, updates: dict) -> TransactionRecord:
-        records = self.list_drafts(case_id)
-        for index, record in enumerate(records):
-            if record.transaction_id == transaction_id:
-                records[index] = record.model_copy(update={k:v for k,v in updates.items() if v is not None})
-                if records[index].review_status == "confirmed":
-                    records[index].provenance = "human_confirmed"
-                self.save_drafts(case_id, records)
-                self.append_audit(case_id, {"event":"draft_updated","transaction_id":transaction_id,"fields":list(updates)})
-                return records[index]
+        with self._case_locks[case_id]:
+            records = self.list_drafts(case_id)
+            for index, record in enumerate(records):
+                if record.transaction_id == transaction_id:
+                    records[index] = record.model_copy(update={k:v for k,v in updates.items() if v is not None})
+                    if records[index].review_status == "confirmed":
+                        records[index].provenance = "human_confirmed"
+                    records = group_duplicate_records(records)
+                    self.save_drafts(case_id, records)
+                    self.append_audit(case_id, {"event":"draft_updated","transaction_id":transaction_id,"fields":list(updates)})
+                    return records[index]
         raise KeyError(transaction_id)
 
     def create_version(self, case_id: str, name: str) -> VersionRecord:
-        records = self.list_drafts(case_id)
+        records = canonical_records(self.list_drafts(case_id))
         if not records or any(record.review_status != "confirmed" for record in records):
             raise ValueError("all draft transactions must be confirmed")
         versions = self.list_versions(case_id)
@@ -125,4 +193,3 @@ class FileRepository(Repository):
         temp = path.with_suffix(path.suffix + ".tmp")
         temp.write_text(json.dumps(value,ensure_ascii=False,indent=2),"utf-8")
         temp.replace(path)
-

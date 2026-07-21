@@ -1,5 +1,6 @@
 from collections import defaultdict, deque
 
+from .ingestion import canonical_records
 from .models import AttributionEdge, AttributionResult, TransactionRecord
 
 
@@ -90,6 +91,7 @@ def attribute_mixed_funds(transactions: list[TransactionRecord], source_account:
 
 
 def build_graph(records: list[TransactionRecord], query: str="", min_amount: float=0, direction: str="all", channel: str="", bank: str="", region: str="", date_from: str="", date_to: str="") -> dict:
+    records=canonical_records(records)
     query=query.lower().strip()
     filtered=[t for t in records if t.amount>=min_amount and (not query or query in " ".join([t.serial_number,t.payer_account,t.payer_name,t.payee_account,t.payee_name,t.summary]).lower()) and (direction=="all" or (direction=="return" and "回流" in t.summary) or (direction=="forward" and "回流" not in t.summary)) and (not channel or t.channel==channel) and (not bank or bank in t.payer_bank or bank in t.payee_bank) and (not region or t.region==region) and (not date_from or t.transaction_time.date().isoformat()>=date_from) and (not date_to or t.transaction_time.date().isoformat()<=date_to)]
     nodes={}; edge_map={};related_by_account=defaultdict(list);incoming_records=defaultdict(list);outgoing_records=defaultdict(list)

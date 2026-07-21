@@ -11,7 +11,8 @@ from fastapi.staticfiles import StaticFiles
 from .analysis import attribute_mixed_funds, build_graph, shortest_path, trace_network
 from .config import Settings, get_settings
 from .demo import demo_case, demo_transactions
-from .models import CaseCreate, CaseRecord, DraftUpdate, SeedCreate, SeedRecord, TransactionRecord, VersionCreate
+from .ingestion import normalize_structured_row
+from .models import CaseCreate, CaseRecord, DraftUpdate, SeedCreate, SeedRecord, SourceLocation, TransactionRecord, VersionCreate
 from .parsers import UnsupportedMaterialError, extract_material, sha256_file
 from .qwen import QwenAdapter
 from .repository import FileRepository
@@ -71,17 +72,31 @@ def create_app(settings: Settings | None=None) -> FastAPI:
         try:chunks=extract_material(path,settings.rar_executable)
         except UnsupportedMaterialError as exc:raise HTTPException(422,str(exc))
         extracted=r.case_dir(case_id)/"extracted"/f"{file_id}.json";extracted.write_text(json.dumps(chunks,ensure_ascii=False,indent=2),"utf-8")
-        created=[]
-        if use_model:
-            adapter=QwenAdapter(settings)
-            for chunk in chunks:
+        extracted_records=[];errors=[];warnings=[];adapter=app.state.qwen
+        for index,chunk in enumerate(chunks):
+            source=SourceLocation(source_file_id=file_id,archive_member_path=chunk.get("archive_member_path"),page_number=chunk.get("page_number"),sheet_name=chunk.get("sheet_name"),table_number=chunk.get("table_number"),paragraph_number=chunk.get("paragraph_number"),row_number=chunk.get("row_number"),region=chunk.get("region"))
+            records=[]
+            if chunk.get("row_data"):
+                structured=normalize_structured_row(chunk["row_data"],source)
+                if structured:records=[structured]
+            if not records and use_model:
                 try:
                     records=adapter.normalize(chunk.get("text",""),Path(chunk["image_path"]) if chunk.get("image_path") else None)
-                    for record in records:
-                        record.source.source_file_id=file_id;record.source.page_number=chunk.get("page_number");record.source.sheet_name=chunk.get("sheet_name");record.source.row_number=chunk.get("row_number");r.add_draft(case_id,record);created.append(record)
-                except RuntimeError:continue
-        manifest["status"]="parsed";manifest["chunk_count"]=len(chunks);manifest["draft_count"]=len(created);manifest_path.write_text(json.dumps(manifest,ensure_ascii=False,indent=2),"utf-8")
-        return {"material":manifest,"chunks":chunks[:50],"drafts":created}
+                    if adapter.last_warning and adapter.last_warning not in warnings:warnings.append(adapter.last_warning)
+                except RuntimeError as exc:
+                    errors.append({"chunk_index":index,"page_number":chunk.get("page_number"),"sheet_name":chunk.get("sheet_name"),"row_number":chunk.get("row_number"),"error":str(exc)});continue
+            for record_index,record in enumerate(records):
+                record_source=source.model_copy(deep=True)
+                if record_source.table_number is not None:
+                    serial="".join(character for character in record.serial_number.upper() if character.isalnum())
+                    matches=[item["row_number"] for item in chunk.get("row_evidence",[]) if serial and serial in "".join(character for character in item["text"].upper() if character.isalnum())]
+                    record_source.row_number=matches[0] if len(matches)==1 else None
+                record.source=record_source;extracted_records.append(record)
+        created=r.reconcile_drafts_for_source(case_id,file_id,extracted_records,replace_missing=not errors) if extracted_records or use_model else []
+        if errors:status="partial" if created else "failed"
+        else:status="parsed" if created or use_model else "extracted"
+        manifest["status"]=status;manifest["chunk_count"]=len(chunks);manifest["draft_count"]=len(created);manifest["error_count"]=len(errors);manifest["warning_count"]=len(warnings);manifest_path.write_text(json.dumps(manifest,ensure_ascii=False,indent=2),"utf-8")
+        return {"material":manifest,"chunks":chunks[:50],"drafts":created,"errors":errors,"warnings":warnings}
 
     @app.post("/api/cases/{case_id}/draft-transactions",status_code=201)
     def add_draft(case_id:str,payload:TransactionRecord,r:FileRepository=Depends(repository)):return r.add_draft(case_id,payload)

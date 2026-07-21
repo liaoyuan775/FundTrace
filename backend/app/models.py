@@ -33,6 +33,8 @@ class SourceLocation(BaseModel):
     archive_member_path: str | None = None
     page_number: int | None = None
     sheet_name: str | None = None
+    table_number: int | None = None
+    paragraph_number: int | None = None
     row_number: int | None = None
     region: list[float] | None = None
 
@@ -67,6 +69,14 @@ class TransactionRecord(BaseModel):
     duplicate_group: str | None = None
     conflict_status: str | None = None
     provenance: Literal["original", "human_confirmed", "rule_computed", "model_suggested"] = "model_suggested"
+
+    @field_validator("transaction_time", mode="after")
+    @classmethod
+    def normalize_business_time(cls, value: datetime) -> datetime:
+        # Source statements describe a local business time. Vision/text models
+        # sometimes append Z even when the source contains no timezone; retain
+        # the displayed wall-clock value and normalize all records consistently.
+        return value.replace(tzinfo=None)
 
     @field_validator("payer_account", "payee_account")
     @classmethod
@@ -125,4 +135,3 @@ class AttributionResult(BaseModel):
     edges: list[AttributionEdge]
     is_inference: bool = True
     disclaimer: str = "本结果为资金研判推定，不代表银行原始事实或司法认定。"
-

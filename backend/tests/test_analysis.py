@@ -64,3 +64,17 @@ def test_rapid_transfer_count_uses_forward_time_window():
         tx(4, 10000).model_copy(update={"transaction_time": base + timedelta(minutes=31)}),
     ]
     assert count_rapid_transfers(incoming, outgoing) == 1
+
+
+def test_graph_counts_duplicate_group_only_once():
+    base = datetime(2026, 7, 17, 10)
+    records = [
+        TransactionRecord(transaction_id="A", transaction_time=base, serial_number="SAME", payer_account="1", payer_name="甲", payee_account="2", payee_name="乙", amount=100, review_status="confirmed", duplicate_group="DUP-1"),
+        TransactionRecord(transaction_id="B", transaction_time=base, serial_number="SAME", payer_account="1", payer_name="甲", payee_account="2", payee_name="乙", amount=100, review_status="confirmed", duplicate_group="DUP-1"),
+    ]
+
+    graph = build_graph(records)
+
+    assert graph["transaction_count"] == 1
+    assert graph["total_amount"] == 100
+    assert graph["edges"][0]["count"] == 1

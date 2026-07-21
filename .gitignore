@@ -12,3 +12,4 @@ data/cases/
 docs/superpowers/
 server.out.log
 server.err.log
+tmp/
