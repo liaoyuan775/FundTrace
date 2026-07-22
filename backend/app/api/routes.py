@@ -3,7 +3,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse
 
 from ..analysis.core import attribute_mixed_funds, build_graph, shortest_path, trace_network
@@ -47,12 +47,42 @@ def archive_case(case_id: str, status: str, repo: FileRepository = Depends(get_r
 
 # ── Materials ──────────────────────────────────────────────────────
 
+def _write_material_manifest(path: Path, manifest: dict) -> None:
+    temp = path.with_suffix(path.suffix + ".tmp")
+    temp.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), "utf-8")
+    temp.replace(path)
+
+
+def _set_material_status(case_id: str, file_id: str, status: str, repo: FileRepository, **updates) -> dict:
+    path = repo.case_dir(case_id) / "materials" / f"{file_id}.json"
+    manifest = json.loads(path.read_text("utf-8"))
+    manifest.update(status=status, **updates)
+    _write_material_manifest(path, manifest)
+    return manifest
+
+
+def _parse_material_batch(case_id: str, file_ids: list[str], repo: FileRepository, qwen, settings) -> None:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(settings.qwen_domain_concurrency, len(file_ids))) as pool:
+        futures = [
+            pool.submit(parse_material, case_id, file_id, True, repo, qwen, settings)
+            for file_id in file_ids
+        ]
+        for future in futures:
+            try:
+                future.result()
+            except Exception:
+                # The individual parser has already persisted the failure details.
+                continue
+
+
 @router.post("/api/cases/{case_id}/materials", status_code=201)
 async def upload_materials(
     case_id: str,
+    background_tasks: BackgroundTasks,
     files: list[UploadFile] = File(...),
     relative_paths: list[str] = Form(default=[]),
     repo: FileRepository = Depends(get_repo),
+    qwen=Depends(get_qwen),
     settings=Depends(get_settings),
 ):
     target = repo.case_dir(case_id) / "materials"
@@ -79,11 +109,20 @@ async def upload_materials(
             "size": len(content),
             "sha256": digest,
             "duplicate": duplicate,
-            "status": "uploaded",
+            "status": "queued",
         }
-        (target / f"{digest}.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), "utf-8")
+        _write_material_manifest(target / f"{digest}.json", manifest)
         results.append(manifest)
         repo.append_audit(case_id, {"event": "material_uploaded", "file_id": digest, "name": manifest["original_name"], "duplicate": duplicate})
+    if results:
+        background_tasks.add_task(
+            _parse_material_batch,
+            case_id,
+            list(dict.fromkeys(item["file_id"] for item in results)),
+            repo,
+            qwen,
+            settings,
+        )
     return results
 
 
@@ -117,10 +156,15 @@ def parse_material(
         raise HTTPException(404, "材料不存在")
     manifest = json.loads(manifest_path.read_text("utf-8"))
     path = material_dir / manifest["stored_name"]
+    _set_material_status(case_id, file_id, "parsing", repo)
     try:
         chunks = extract_material(path, settings.rar_executable)
     except UnsupportedMaterialError as exc:
+        _set_material_status(case_id, file_id, "failed", repo, error_count=1, errors=[str(exc)])
         raise HTTPException(422, str(exc))
+    except Exception as exc:
+        _set_material_status(case_id, file_id, "failed", repo, error_count=1, errors=[f"材料读取失败: {type(exc).__name__}"])
+        raise HTTPException(500, f"材料读取失败: {type(exc).__name__}") from exc
     extracted = repo.case_dir(case_id) / "extracted" / f"{file_id}.json"
     extracted.write_text(json.dumps(chunks, ensure_ascii=False, indent=2), "utf-8")
     extracted_records = []
@@ -185,7 +229,7 @@ def parse_material(
                 rw = local_adapter.retry_warnings
                 return (index, [], None, rw, str(exc), chunk, source)
 
-        with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=settings.qwen_domain_concurrency) as pool:
             futures = [pool.submit(_vlm_parse, *t) for t in vlm_tasks]
             for future in concurrent.futures.as_completed(futures):
                 index, records, warning, retry_warnings, error, chunk_obj, chunk_source = future.result()
@@ -231,7 +275,9 @@ def parse_material(
     manifest["draft_count"] = len(created)
     manifest["error_count"] = len(errors)
     manifest["warning_count"] = len(warnings)
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), "utf-8")
+    manifest["errors"] = errors
+    manifest["warnings"] = warnings
+    _write_material_manifest(manifest_path, manifest)
     return {"material": manifest, "chunks": chunks[:50], "drafts": created, "errors": errors, "warnings": warnings}
 
 

@@ -1,6 +1,7 @@
 from functools import lru_cache
 from pathlib import Path
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,6 +10,8 @@ class Settings(BaseSettings):
     qwen_base_url: str = ""
     qwen_api_key: str = ""
     qwen_model: str = "Qwen3.6-35B-A3B"
+    qwen_domain_concurrency: int = Field(default=6, ge=1, le=32)
+    qwen_schema_retries: int = Field(default=2, ge=0, le=5)
     rar_executable: str = ""
     max_upload_mb: int = 100
     max_archive_files: int = 2000
@@ -31,6 +34,8 @@ class Settings(BaseSettings):
             "QWEN_BASE_URL": "qwen_base_url",
             "QWEN_API_KEY": "qwen_api_key",
             "QWEN_MODEL": "qwen_model",
+            "QWEN_DOMAIN_CONCURRENCY": "qwen_domain_concurrency",
+            "QWEN_SCHEMA_RETRIES": "qwen_schema_retries",
             "RAR_EXECUTABLE": "rar_executable",
         }
         # 导入os模块以访问环境变量

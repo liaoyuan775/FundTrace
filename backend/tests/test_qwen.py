@@ -2,6 +2,7 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 
 import httpx
+import pytest
 
 from app.config import Settings
 from app.ai.qwen import QwenAdapter, classification_response_format, transaction_response_format
@@ -24,7 +25,7 @@ def test_qwen_uses_strict_fixed_transaction_schema():
     }.issubset(transaction_schema["required"])
 
 
-def test_qwen_fallback_keeps_fixed_contract_and_marks_actual_mode(monkeypatch):
+def test_qwen_never_downgrades_strict_schema_on_client_error(monkeypatch):
     calls = []
     transaction = {
         "transaction_time": "2026-07-17T10:00:00",
@@ -60,24 +61,59 @@ def test_qwen_fallback_keeps_fixed_contract_and_marks_actual_mode(monkeypatch):
     def fake_post(url, **kwargs):
         calls.append(json.loads(json.dumps(kwargs["json"])))
         request = httpx.Request("POST", url)
-        if len(calls) == 1:
-            return httpx.Response(400, request=request, json={"error": "unsupported"})
-        return httpx.Response(
-            200,
-            request=request,
-            json={"choices": [{"message": {"content": json.dumps({"transactions": [transaction]})}}]},
-        )
+        return httpx.Response(400, request=request, json={"error": "unsupported"})
 
     monkeypatch.setattr(httpx, "post", fake_post)
-    adapter = QwenAdapter(Settings(qwen_base_url="http://model.test/v1", qwen_api_key="secret"))
+    adapter = QwenAdapter(Settings(qwen_base_url="http://model.test/v1", qwen_api_key="secret", qwen_schema_retries=2))
+
+    with pytest.raises(RuntimeError, match="模型解析失败"):
+        adapter.normalize("一笔流水")
+
+    assert calls[0]["response_format"]["type"] == "json_schema"
+    assert len(calls) == 1
+    assert adapter.last_schema_mode == "strict"
+
+
+def test_qwen_retries_server_error_with_same_strict_schema(monkeypatch):
+    calls = []
+    transaction = {
+        "transaction_time": "2026-07-17T10:00:00", "serial_number": "T001",
+        "payer_account": "1", "payer_name": "甲", "payer_institution": None,
+        "payer_bank": None, "payee_account": "2", "payee_name": "乙",
+        "payee_institution": None, "payee_bank": None, "debit_credit": "借",
+        "currency": "CNY", "amount": 100, "balance_after": 900,
+        "channel": "手机银行", "summary": "转账", "region": None,
+        "transaction_type": "转账", "event_status": "success", "order_id": None,
+        "batch_id": None, "merchant_id": None, "merchant_name": None,
+        "terminal_id": None, "authorization_code": None, "fee": None,
+        "related_transaction_id": None, "relation_type": None,
+    }
+
+    def fake_post(url, **kwargs):
+        calls.append(json.loads(json.dumps(kwargs["json"])))
+        request = httpx.Request("POST", url)
+        if len(calls) == 1:
+            return httpx.Response(503, request=request)
+        return httpx.Response(200, request=request, json={"choices": [{"message": {"content": json.dumps({"transactions": [transaction]})}}]})
+
+    monkeypatch.setattr(httpx, "post", fake_post)
+    adapter = QwenAdapter(Settings(qwen_base_url="http://model.test/v1", qwen_api_key="secret", qwen_schema_retries=1))
 
     records = adapter.normalize("一笔流水")
 
-    assert calls[0]["response_format"]["type"] == "json_schema"
-    assert calls[1]["response_format"] == {"type": "json_object"}
-    assert "payer_account" in calls[1]["messages"][0]["content"]
-    assert records[0].prompt_version == "v2-json-object"
-    assert "已降级" in adapter.last_warning
+    assert len(records) == 1
+    assert [call["response_format"]["type"] for call in calls] == ["json_schema", "json_schema"]
+    assert records[0].prompt_version == "v2-strict"
+
+
+def test_qwen_runtime_settings_accept_env_concurrency_and_retry(monkeypatch):
+    monkeypatch.setenv("QWEN_DOMAIN_CONCURRENCY", "6")
+    monkeypatch.setenv("QWEN_SCHEMA_RETRIES", "3")
+
+    settings = Settings(_env_file=None)
+
+    assert settings.qwen_domain_concurrency == 6
+    assert settings.qwen_schema_retries == 3
 
 
 def test_subtype_prompt_selects_pos_specific_evidence_fields():

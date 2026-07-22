@@ -11,6 +11,7 @@ import {
   FolderOpen,
   Gauge,
   GitBranch,
+  LoaderCircle,
   Menu,
   Pause,
   Play,
@@ -122,6 +123,7 @@ export default function App() {
   const [tick, setTick] = useState(0);
   const [toast, setToast] = useState("");
   const [busy, setBusy] = useState(false);
+  const previousActiveMaterials = useRef(0);
   const notify = (message: string) => {
     setToast(message);
     setTimeout(() => setToast(""), 2200);
@@ -174,6 +176,33 @@ export default function App() {
   useEffect(() => {
     reload().catch((e) => notify(e.message));
   }, [reload]);
+  const activeMaterialCount = materials.filter((item) =>
+    ["queued", "parsing"].includes(item.status),
+  ).length;
+  useEffect(() => {
+    if (!caseId || activeMaterialCount === 0) return;
+    const timer = window.setInterval(() => {
+      api.listMaterials(caseId).then((next) => {
+        setMaterials(next);
+        if (!next.some((item) => ["queued", "parsing"].includes(item.status))) {
+          reload().catch((e) => notify(e.message));
+        }
+      }).catch((e) => notify(e.message));
+    }, 1200);
+    return () => window.clearInterval(timer);
+  }, [caseId, activeMaterialCount, reload]);
+  useEffect(() => {
+    if (previousActiveMaterials.current > 0 && activeMaterialCount === 0) {
+      const failed = materials.filter((item) => item.status === "failed").length;
+      const partial = materials.filter((item) => item.status === "partial").length;
+      notify(
+        failed || partial
+          ? `建模结束：${failed} 份失败，${partial} 份部分成功`
+          : "全部材料建模完成，可进入流水校核",
+      );
+    }
+    previousActiveMaterials.current = activeMaterialCount;
+  }, [activeMaterialCount, materials]);
   useEffect(() => {
     if (!playing) return;
     const timer = setInterval(() => setTick((x) => x + 1), 520);
@@ -251,7 +280,7 @@ export default function App() {
     setBusy(true);
     try {
       await api.uploadMaterials(caseId, [...files]);
-      notify(`已接收 ${files.length} 份材料`);
+      notify(`已接收 ${files.length} 份材料，正在自动建模`);
       await reload();
     } catch (e: any) {
       notify(e.message);
@@ -696,17 +725,27 @@ function MaterialsView({
                 SHA-256 {m.sha256.slice(0, 16)}… · {(m.size / 1024).toFixed(1)}{" "}
                 KB
               </small>
+              {m.errors?.[0] && (
+                <small className="material-error">
+                  {typeof m.errors[0] === "string" ? m.errors[0] : m.errors[0].error}
+                </small>
+              )}
             </div>
-            <span className={`status ${m.status === "parsed" ? "ok" : ""}`}>
+            <span className={`status ${m.status === "parsed" ? "ok" : ""} ${["queued", "parsing"].includes(m.status) ? "working" : ""}`}>
+              {["queued", "parsing"].includes(m.status) && <LoaderCircle size={12} />}
               {m.status === "failed"
                 ? "建模失败"
                 : m.status === "partial"
                   ? "部分成功"
+                  : m.status === "queued"
+                    ? "排队中"
+                    : m.status === "parsing"
+                      ? "建模中"
                   : m.duplicate
                 ? "重复材料"
                 : m.status === "parsed"
-                  ? "已提取"
-                  : "待解析"}
+                  ? "已完成"
+                  : "待处理"}
             </span>
             <a
               className="command"
@@ -715,9 +754,11 @@ function MaterialsView({
             >
               原始证据
             </a>
-            <button className="command" onClick={() => onParse(m.file_id)}>
-              <FileSearch size={14} /> 提取并建模
-            </button>
+            {["failed", "partial", "uploaded"].includes(m.status) && (
+              <button className="command" onClick={() => onParse(m.file_id)}>
+                <FileSearch size={14} /> 重新建模
+              </button>
+            )}
           </div>
         ))}
       </div>

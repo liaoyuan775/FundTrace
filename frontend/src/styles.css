@@ -356,13 +356,26 @@ button {
   color: var(--muted);
   font-size: 10px;
 }
+.material-row .material-error {
+  margin-top: 4px;
+  color: #a72d36;
+}
 .status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   font-size: 10px;
   padding: 4px 7px;
   border: 1px solid #9eb8cf;
   border-radius: 2px;
   color: #41627d;
   white-space: nowrap;
+}
+.status.working svg {
+  animation: material-spin 0.9s linear infinite;
+}
+@keyframes material-spin {
+  to { transform: rotate(360deg); }
 }
 .status.ok {
   color: #236d4d;

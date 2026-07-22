@@ -111,6 +111,7 @@ class QwenAdapter:
         self.settings = settings
         self._state = threading.local()
         self._vision_lock = threading.Lock()
+        self._request_slots = threading.BoundedSemaphore(settings.qwen_domain_concurrency)
         self._vision_attempted = False
         self._vision_succeeded = False
         self.last_schema_mode = "strict"
@@ -160,6 +161,16 @@ class QwenAdapter:
             "Authorization": f"Bearer {self.settings.qwen_api_key}",
             "Content-Type": "application/json",
         }
+
+    def _post(self, url: str, *, payload: dict, timeout: float):
+        with self._request_slots:
+            return httpx.post(
+                url,
+                headers=self._headers(),
+                json=payload,
+                timeout=timeout,
+                trust_env=False,
+            )
 
     @staticmethod
     def _typed_record_updates(item: ExtractedTransaction, record_type: str) -> dict:
@@ -238,31 +249,50 @@ class QwenAdapter:
                     },
                 },
             ]
-        try:
-            response = httpx.post(
-                f"{self.settings.qwen_base_url.rstrip('/')}/chat/completions",
-                headers=self._headers(),
-                json={
+        payload = {
                     "model": self.settings.qwen_model,
                     "messages": [{"role": "user", "content": content}],
                     "temperature": 0,
                     "max_tokens": 256,
                     "response_format": classification_response_format(),
                     "chat_template_kwargs": {"enable_thinking": False},
-                },
-                timeout=90,
-                trust_env=False,
-            )
-            response.raise_for_status()
-            raw = response.json()["choices"][0]["message"]["content"]
-            result = MaterialClassification.model_validate(
-                json.loads(raw) if isinstance(raw, str) else raw
-            )
-            if image_path:
-                self._mark_vision(succeeded=True)
-            return result
-        except Exception as exc:
-            raise RuntimeError(f"材料分类失败: {type(exc).__name__}") from exc
+                }
+        warnings = []
+        last = None
+        for attempt in range(1 + self.settings.qwen_schema_retries):
+            try:
+                response = self._post(
+                    f"{self.settings.qwen_base_url.rstrip('/')}/chat/completions",
+                    payload=payload,
+                    timeout=90,
+                )
+                response.raise_for_status()
+                raw = response.json()["choices"][0]["message"]["content"]
+                result = MaterialClassification.model_validate(json.loads(raw) if isinstance(raw, str) else raw)
+                if image_path:
+                    self._mark_vision(succeeded=True)
+                return result
+            except httpx.HTTPStatusError as exc:
+                last = exc
+                status = exc.response.status_code
+                warnings.append(f"分类第{attempt + 1}次: HTTP {status}")
+                if attempt + 1 >= 1 + self.settings.qwen_schema_retries or not (status == 408 or status == 429 or status >= 500):
+                    break
+            except httpx.HTTPError as exc:
+                last = exc
+                warnings.append(f"分类第{attempt + 1}次: {type(exc).__name__}")
+            except Exception as exc:
+                last = exc
+                warnings.append(f"分类第{attempt + 1}次: {type(exc).__name__}")
+                if attempt + 1 < 1 + self.settings.qwen_schema_retries:
+                    correction = build_validation_retry_prompt(str(exc))
+                    message_content = payload["messages"][0]["content"]
+                    if isinstance(message_content, list):
+                        message_content.append({"type": "text", "text": correction})
+                    else:
+                        payload["messages"][0]["content"] = message_content + "\n" + correction
+        self.last_warning = "; ".join(warnings)
+        raise RuntimeError(f"材料分类失败: {type(last).__name__}") from last
 
     def normalize(
         self,
@@ -300,22 +330,19 @@ class QwenAdapter:
         self.last_warning = ""
         self._state.retry_warnings = []
         last = None
-        for attempt in range(3):
+        attempts = 1 + self.settings.qwen_schema_retries
+        for attempt in range(attempts):
             try:
-                response = httpx.post(
+                response = self._post(
                     f"{self.settings.qwen_base_url.rstrip('/')}/chat/completions",
-                    headers=self._headers(),
-                    json=payload,
+                    payload=payload,
                     timeout=90,
-                    trust_env=False,
                 )
                 response.raise_for_status()
                 raw = response.json()["choices"][0]["message"]["content"]
                 data = json.loads(raw) if isinstance(raw, str) else raw
                 batch = TransactionBatch.model_validate(data)
-                prompt_version = (
-                    "v2-strict" if self.last_schema_mode == "strict" else "v2-json-object"
-                )
+                prompt_version = "v2-strict"
                 records = [
                     TransactionRecord.model_validate(
                         {
@@ -347,19 +374,24 @@ class QwenAdapter:
                 last = exc
                 msg = f"第{attempt+1}次重试: HTTP {exc.response.status_code}"
                 self._state.retry_warnings.append(msg)
-                if attempt == 0 and exc.response.status_code in {400, 404, 415, 422}:
-                    payload["response_format"] = {"type": "json_object"}
-                    self.last_schema_mode = "json_object"
-                    self.last_warning = (
-                        f"服务端不支持严格JSON Schema，已降级: HTTP {exc.response.status_code}"
-                    )
+                status = exc.response.status_code
+                if attempt + 1 < attempts and (status == 408 or status == 429 or status >= 500):
                     continue
+                break
+            except httpx.HTTPError as exc:
+                last = exc
+                self._state.retry_warnings.append(
+                    f"第{attempt+1}次重试: {type(exc).__name__}"
+                )
+                if attempt + 1 < attempts:
+                    continue
+                break
             except Exception as exc:
                 last = exc
                 self._state.retry_warnings.append(
                     f"第{attempt+1}次重试: {type(exc).__name__}"
                 )
-                if attempt < 2 and not isinstance(exc, httpx.HTTPError):
+                if attempt + 1 < attempts:
                     correction = build_validation_retry_prompt(str(exc))
                     message_content = payload["messages"][0]["content"]
                     if isinstance(message_content, list):
