@@ -5,6 +5,9 @@ from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+
 class Settings(BaseSettings):
     data_dir: Path = Path("./data")
     qwen_base_url: str = ""
@@ -17,7 +20,11 @@ class Settings(BaseSettings):
     max_archive_files: int = 2000
     max_archive_bytes: int = 1024 * 1024 * 1024
 
-    model_config = SettingsConfigDict(env_file=".env", env_prefix="", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=PROJECT_ROOT / ".env",
+        env_prefix="",
+        extra="ignore",
+    )
 
     def model_post_init(self, __context):
         """

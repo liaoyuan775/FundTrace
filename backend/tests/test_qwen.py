@@ -1,5 +1,6 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import httpx
 import pytest
@@ -114,6 +115,14 @@ def test_qwen_runtime_settings_accept_env_concurrency_and_retry(monkeypatch):
 
     assert settings.qwen_domain_concurrency == 6
     assert settings.qwen_schema_retries == 3
+
+
+def test_settings_dotenv_path_does_not_depend_on_working_directory(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    env_file = Path(Settings.model_config["env_file"])
+
+    assert env_file == Path(__file__).resolve().parents[2] / ".env"
 
 
 def test_subtype_prompt_selects_pos_specific_evidence_fields():
