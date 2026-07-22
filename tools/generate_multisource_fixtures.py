@@ -10,16 +10,16 @@ from pathlib import Path
 
 
 FILE_SPECS = [
-    ("01_甲银行账户流水.csv", 18, 2),
-    ("02_乙银行交易明细.xlsx", 18, 2),
-    ("03_丙银行电子流水.pdf", 14, 1),
-    ("04_丁银行调证材料.docx", 14, 1),
-    ("05_手机银行转账记录.png", 9, 1),
-    ("06_聚合支付平台明细.xlsx", 13, 2),
-    ("07_三方支付账单截图.jpg", 9, 1),
-    ("08_公安调取流水汇总.csv", 9, 1),
-    ("09_戊银行流水证明.pdf", 8, 2),
-    ("10_案件资金流转摘录.docx", 8, 2),
+    ("中国工商银行湘潭分行_账户交易明细_20260618.csv", 18, 2),
+    ("中国农业银行长沙分行_账户交易流水_20260618.xlsx", 18, 2),
+    ("中国银行湖南省分行_账户电子回单_20260618.pdf", 14, 1),
+    ("招商银行长沙分行_账户调证流水_20260618.docx", 14, 1),
+    ("中国建设银行手机银行_转账回单_20260618.png", 9, 1),
+    ("聚合支付商户结算明细_20260618.xlsx", 13, 2),
+    ("第三方支付平台交易账单_20260618.jpg", 9, 1),
+    ("公安机关调取银行流水汇总表_20260618-20260619.csv", 9, 1),
+    ("交通银行长沙分行_账户交易证明_20260619.pdf", 8, 2),
+    ("涉案资金流转记录摘录_20260618-20260619.docx", 8, 2),
 ]
 
 ENTITY_BANKS = (
@@ -39,6 +39,10 @@ ENTITY_NAMES = (
     "长沙市雨花区悦邻便利店", "长沙市天心区汇诚通讯商行", "湖南盛联数字技术有限公司",
     "中国建设银行长沙解放西路ATM", "长沙市开福区鑫悦烟酒商行", "跨境支付商户 NORTHSTAR DIGITAL",
 )
+
+IMAGE_CANVAS_WIDTH = 2520
+IMAGE_COLUMN_WIDTHS = (260, 250, 270, 320, 270, 380, 140, 170, 160, 190)
+PDF_COLUMN_WIDTHS = (75, 82, 105, 90, 105, 110, 52, 62, 50, 58)
 
 DISPLAY_HEADERS = [
     "交易时间", "流水号", "付款账号", "付款户名", "收款账号",
@@ -186,11 +190,25 @@ def _write_pdf(path: Path, rows: list[dict], title: str) -> None:
     pdfmetrics.registerFont(UnicodeCIDFont("STSong-Light"))
     styles = getSampleStyleSheet()
     title_style = ParagraphStyle("ChineseTitle", parent=styles["Title"], fontName="STSong-Light", fontSize=16, alignment=TA_CENTER)
+    cell_style = ParagraphStyle(
+        "ChineseCell",
+        parent=styles["BodyText"],
+        fontName="STSong-Light",
+        fontSize=6.5,
+        leading=8,
+        wordWrap="CJK",
+    )
     document = SimpleDocTemplate(str(path), pagesize=landscape(A4), leftMargin=24, rightMargin=24, topMargin=24, bottomMargin=24)
     elements = [Paragraph(title, title_style)]
     for start in range(0, len(rows), 8):
-        data = [DISPLAY_HEADERS] + [_display_row(item) for item in rows[start:start + 8]]
-        table = Table(data, repeatRows=1, colWidths=[88, 90, 94, 48, 94, 58, 50, 60, 52, 58])
+        data = [
+            [Paragraph(str(value), cell_style) for value in DISPLAY_HEADERS],
+            *[
+                [Paragraph(str(value), cell_style) for value in _display_row(item)]
+                for item in rows[start:start + 8]
+            ],
+        ]
+        table = Table(data, repeatRows=1, colWidths=PDF_COLUMN_WIDTHS)
         table.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), "STSong-Light"), ("FONTSIZE", (0, 0), (-1, -1), 7.5),
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#173B57")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -230,16 +248,15 @@ def _write_docx(path: Path, rows: list[dict], title: str) -> None:
 def _write_image(path: Path, rows: list[dict], title: str, noisy: bool) -> None:
     from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
-    width, row_height = 2520, 76
+    width, row_height = IMAGE_CANVAS_WIDTH, 76
     height = 150 + row_height * (len(rows) + 1)
     image = Image.new("RGB", (width, height), "#F4F7FA")
     draw = ImageDraw.Draw(image)
     font_path = Path("C:/Windows/Fonts/msyh.ttc")
     title_font = ImageFont.truetype(str(font_path), 34); header_font = ImageFont.truetype(str(font_path), 22); body_font = ImageFont.truetype(str(font_path), 20)
     draw.rectangle((0, 0, width, 105), fill="#153B5B"); draw.text((42, 28), title, font=title_font, fill="white")
-    widths = [260, 250, 270, 150, 270, 260, 140, 170, 160, 190]
     x_positions = [30]
-    for value in widths[:-1]: x_positions.append(x_positions[-1] + value)
+    for value in IMAGE_COLUMN_WIDTHS[:-1]: x_positions.append(x_positions[-1] + value)
     top = 120
     draw.rectangle((20, top, width - 20, top + row_height), fill="#DDE7EF")
     for index, header in enumerate(DISPLAY_HEADERS): draw.text((x_positions[index], top + 22), header, font=header_font, fill="#173B57")
@@ -267,10 +284,14 @@ def generate_base_materials(output_dir: Path) -> None:
     truth = build_truth(); distribution = build_distribution(truth["transactions"])
     appearances = Counter(transaction_id for item in distribution for transaction_id in item["transaction_ids"])
     truth["duplicate_transaction_ids"] = sorted(transaction_id for transaction_id, count in appearances.items() if count > 1)
-    (oracle_dir / "ground_truth.json").write_text(json.dumps(truth, ensure_ascii=False, indent=2), "utf-8")
-    (oracle_dir / "distribution.json").write_text(json.dumps(distribution, ensure_ascii=False, indent=2), "utf-8")
+    (oracle_dir / "ground_truth.json").write_text(
+        json.dumps(truth, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n"
+    )
+    (oracle_dir / "distribution.json").write_text(
+        json.dumps(distribution, ensure_ascii=False, indent=2), encoding="utf-8", newline="\n"
+    )
     with (oracle_dir / "file_manifest.csv").open("w", newline="", encoding="utf-8-sig") as handle:
-        writer = csv.writer(handle); writer.writerow(["文件名", "格式", "记录出现数", "唯一来源数", "重复出现数"])
+        writer = csv.writer(handle, lineterminator="\n"); writer.writerow(["文件名", "格式", "记录出现数", "唯一来源数", "重复出现数"])
         for item in distribution: writer.writerow([item["filename"], item["format"], len(item["transaction_ids"]), item["unique_source_count"], item["duplicate_appearance_count"]])
     for index, spec in enumerate(distribution):
         path = materials_dir / spec["filename"]; rows = _rows(spec, truth); suffix = path.suffix.lower()

@@ -15,13 +15,13 @@ const distribution = JSON.parse(await fs.readFile(path.join(oracleDir, "distribu
 const byId = new Map(truth.transactions.map((item) => [item.transaction_id, item]));
 
 const variants = {
-  "02_乙银行交易明细.xlsx": {
+  "中国农业银行长沙分行_账户交易流水_20260618.xlsx": {
     sheetName: "交易明细",
     headers: ["交易日期", "交易流水号", "付款账号", "付款户名", "付款行", "收款账号", "收款户名", "收款行", "借贷标志", "币种", "交易金额", "交易后余额", "交易渠道", "摘要", "地区", "交易类型"],
     dateStyle: "date",
     amountStyle: "number",
   },
-  "06_聚合支付平台明细.xlsx": {
+  "聚合支付商户结算明细_20260618.xlsx": {
     sheetName: "支付账单",
     headers: ["完成时间", "商户订单号", "付款方账号", "付款方户名", "付款方银行", "收款方账号", "收款方户名", "收款方银行", "方向", "货币", "支付金额", "账户余额", "支付方式", "用途", "发生地", "业务类型"],
     dateStyle: "text",
@@ -79,11 +79,11 @@ for (const [filename, variant] of Object.entries(variants)) {
   } else {
     sheet.getRange(`K2:L${endRow}`).format.numberFormat = "@";
   }
-  const widthsPx = [165, 175, 185, 115, 170, 185, 115, 170, 85, 70, 110, 110, 115, 135, 105, 95];
+  const widthsPx = [165, 175, 185, 240, 205, 185, 240, 205, 85, 70, 110, 110, 115, 135, 105, 95];
   widthsPx.forEach((width, index) => {
     sheet.getRangeByIndexes(0, index, endRow, 1).format.columnWidthPx = width;
   });
-  sheet.tables.add(`A1:P${endRow}`, true, `Transactions${filename.startsWith("02") ? "Bank" : "Pay"}`);
+  sheet.tables.add(`A1:P${endRow}`, true, `Transactions${filename.startsWith("中国农业") ? "Bank" : "Pay"}`);
   const output = await SpreadsheetFile.exportXlsx(workbook);
   const outputPath = path.join(outputDir, filename);
   await output.save(outputPath);

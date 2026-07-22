@@ -8,9 +8,13 @@ from tools.generate_multisource_fixtures import (
     DISPLAY_HEADERS,
     ENTITY_BANKS,
     ENTITY_NAMES,
+    IMAGE_CANVAS_WIDTH,
+    IMAGE_COLUMN_WIDTHS,
+    PDF_COLUMN_WIDTHS,
     _display_row,
     build_distribution,
     build_truth,
+    generate_base_materials,
     generate_xlsx,
     validate_material_set,
 )
@@ -87,11 +91,31 @@ def test_unstructured_material_rows_include_transaction_balance():
     assert len(_display_row(transaction)) == len(DISPLAY_HEADERS)
 
 
+def test_unstructured_material_layout_reserves_space_for_realistic_names():
+    assert len(IMAGE_COLUMN_WIDTHS) == len(DISPLAY_HEADERS)
+    assert sum(IMAGE_COLUMN_WIDTHS) + 60 <= IMAGE_CANVAS_WIDTH
+    assert IMAGE_COLUMN_WIDTHS[3] >= 320
+    assert IMAGE_COLUMN_WIDTHS[5] >= 380
+
+    # Landscape A4 with 24-point margins on both sides leaves about 794 points.
+    assert len(PDF_COLUMN_WIDTHS) == len(DISPLAY_HEADERS)
+    assert sum(PDF_COLUMN_WIDTHS) <= 794
+    assert PDF_COLUMN_WIDTHS[3] >= 90
+    assert PDF_COLUMN_WIDTHS[5] >= 110
+
+
 def test_material_set_validation_rejects_missing_xlsx_files(tmp_path):
     (tmp_path / "materials").mkdir()
 
     with pytest.raises(RuntimeError, match="材料文件集合不完整"):
         validate_material_set(tmp_path)
+
+
+def test_oracle_text_files_use_repository_line_endings(tmp_path):
+    generate_base_materials(tmp_path)
+
+    for filename in ("ground_truth.json", "distribution.json", "file_manifest.csv"):
+        assert b"\r\n" not in (tmp_path / "oracle" / filename).read_bytes()
 
 
 def test_xlsx_generation_requires_explicit_artifact_runtime(tmp_path):
