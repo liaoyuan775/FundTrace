@@ -1,10 +1,13 @@
 from collections import Counter
 from pathlib import Path
+import re
 
 import pytest
 
 from tools.generate_multisource_fixtures import (
     DISPLAY_HEADERS,
+    ENTITY_BANKS,
+    ENTITY_NAMES,
     _display_row,
     build_distribution,
     build_truth,
@@ -14,6 +17,34 @@ from tools.generate_multisource_fixtures import (
 from app.analysis.core import build_graph
 from app.models import TransactionRecord
 from app.parsing.classification import classify_chunk
+
+
+def test_synthetic_entity_registry_uses_approved_realistic_names():
+    expected_names = (
+        "唐文博", "蒋雨欣", "罗静怡", "许志远",
+        "彭嘉航", "何梦琪", "周启明", "蔡安然", "邓宇辰", "姚思宁", "韩泽凯", "苏婉清",
+        "程浩然", "叶知秋", "魏俊驰", "沈依宁", "戴云舟", "陆可欣", "熊致远", "谭若琳",
+        "长沙景程电子商务有限公司", "湖南远澜网络科技有限公司", "长沙市芙蓉区嘉禾百货商行",
+        "湖南启辰电子贸易有限公司", "长沙汇泽商务咨询有限公司", "湖南云帆数码科技有限公司",
+        "长沙市雨花区悦邻便利店", "长沙市天心区汇诚通讯商行", "湖南盛联数字技术有限公司",
+        "中国建设银行长沙解放西路ATM", "长沙市开福区鑫悦烟酒商行", "跨境支付商户 NORTHSTAR DIGITAL",
+    )
+
+    assert ENTITY_NAMES == expected_names
+    assert len(set(ENTITY_NAMES)) == 32
+    assert ENTITY_BANKS == (
+        "中国工商银行长沙分行",
+        "中国农业银行长沙分行",
+        "中国银行湖南省分行",
+        "中国建设银行长沙分行",
+        "交通银行长沙分行",
+    )
+    placeholder = re.compile(
+        r"受害人[甲乙丙丁]|某(?:一|二|三|四|五|六|七|八|九|十)|商户[AB]|甲银行"
+    )
+    assert not any(placeholder.search(name) for name in ENTITY_NAMES + ENTITY_BANKS)
+    truth = build_truth()
+    assert tuple(entity["name"] for entity in truth["entities"]) == ENTITY_NAMES
 
 
 def test_synthetic_case_has_fixed_scale_and_multiformat_distribution():
