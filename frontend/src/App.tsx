@@ -20,8 +20,12 @@ import {
   Upload,
 } from "lucide-react";
 import * as api from "./api";
-import { resizeAnalysisSplit } from "./analysis-split";
+import {
+  maximumGraphHeight,
+  resizeAnalysisSplit,
+} from "./analysis-split";
 import GraphCanvas from "./GraphCanvas";
+import { selectionForTransaction } from "./selection-state";
 import type {
   CaseRecord,
   GraphData,
@@ -55,6 +59,27 @@ const mask = (account: string) =>
   account.length > 8
     ? `${account.slice(0, 4)} **** **** ${account.slice(-4)}`
     : account;
+const transactionSourceLabel = (
+  transaction: Transaction,
+  materials: Material[],
+) => {
+  const source = transaction.source;
+  const material = materials.find(
+    (item) => item.file_id === source.source_file_id,
+  );
+  const fileName =
+    material?.relative_path ||
+    material?.original_name ||
+    source.source_file_id ||
+    "未定位原始材料";
+  const location = [
+    source.page_number ? `第${source.page_number}页` : "",
+    source.sheet_name ? `${source.sheet_name}工作表` : "",
+    source.row_number ? `第${source.row_number}行` : "",
+  ].filter(Boolean);
+
+  return location.length ? `${fileName} · ${location.join(" · ")}` : fileName;
+};
 const tabs = [
   ["cases", "案件中心", FolderOpen],
   ["materials", "材料接收", Upload],
@@ -70,6 +95,7 @@ export default function App() {
   const [caseInfo, setCaseInfo] = useState<CaseRecord | null>(null);
   const [materials, setMaterials] = useState<Material[]>([]);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [allTransactions, setAllTransactions] = useState<Transaction[]>([]);
   const [total, setTotal] = useState(0);
   const [versions, setVersions] = useState<Version[]>([]);
   const [seeds, setSeeds] = useState<Seed[]>([]);
@@ -90,7 +116,6 @@ export default function App() {
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
   const [selectedTx, setSelectedTx] = useState<Transaction | null>(null);
-  const [layout, setLayout] = useState("layered");
   const [attribution, setAttribution] = useState("fifo");
   const [attributionData, setAttributionData] = useState<any>(null);
   const [playing, setPlaying] = useState(false);
@@ -114,10 +139,22 @@ export default function App() {
   const reload = useCallback(async () => {
     if (!caseId) return;
     const active = { ...filters, status };
-    const [info, ms, tx, vs, ss, g] = await Promise.all([
+    const [info, ms, tx, allTx, vs, ss, g] = await Promise.all([
       api.getCase(caseId),
       api.listMaterials(caseId),
       api.getTransactions(caseId, active),
+      api.getTransactions(caseId, {
+        query: "",
+        status: "",
+        minAmount: 0,
+        direction: "all",
+        channel: "",
+        bank: "",
+        region: "",
+        dateFrom: "",
+        dateTo: "",
+        sort: "time_asc",
+      }),
       api.listVersions(caseId),
       api.listSeeds(caseId),
       api.getGraph(caseId, active),
@@ -125,6 +162,7 @@ export default function App() {
     setCaseInfo(info);
     setMaterials(ms);
     setTransactions(tx.items);
+    setAllTransactions(allTx.items);
     setTotal(tx.total);
     setVersions(vs);
     setSeeds(ss);
@@ -186,10 +224,28 @@ export default function App() {
     setSelectedTx(null);
   }, []);
   const selectTransaction = useCallback((tx: Transaction | null) => {
-    setSelectedTx(tx);
+    const selection = selectionForTransaction(tx);
+    setSelectedTx(selection.selectedTx);
+    setSelectedNode(selection.selectedNode);
+    setSelectedEdge(selection.selectedEdge);
+  }, []);
+  const clearSelection = useCallback(() => {
     setSelectedNode(null);
     setSelectedEdge(null);
+    setSelectedTx(null);
   }, []);
+  const changeCase = (nextCaseId: string, confirmSwitch: boolean) => {
+    if (!nextCaseId || nextCaseId === caseId) return;
+    if (
+      confirmSwitch &&
+      caseId &&
+      !window.confirm("切换案件后，当前页面将显示另一案件的数据。确认切换？")
+    ) {
+      return;
+    }
+    clearSelection();
+    setCaseId(nextCaseId);
+  };
   const handleUpload = async (files: FileList | null) => {
     if (!files || !caseId) return;
     setBusy(true);
@@ -211,12 +267,15 @@ export default function App() {
         </button>
         <div className="brand-mark">穿</div>
         <div className="brand">
-          <strong>FundTrace</strong>
-          <span>电诈资金链穿透研判台</span>
+          <strong>涉诈资金链路分析系统</strong>
+          <span>多源流水归集 · 资金穿透研判</span>
         </div>
         <div className="case-switch">
           <span>当前案件</span>
-          <select value={caseId} onChange={(e) => setCaseId(e.target.value)}>
+          <select
+            value={caseId}
+            onChange={(e) => changeCase(e.target.value, tab !== "cases")}
+          >
             {cases.map((c) => (
               <option key={c.case_id} value={c.case_id}>
                 {c.case_number} · {c.name}
@@ -252,20 +311,34 @@ export default function App() {
           </button>
         </div>
       </nav>
-      <section className="content">
+      <section className={`content ${tab !== "cases" && caseInfo ? "with-workflow" : ""}`}>
+        {tab !== "cases" && caseInfo && (
+          <CaseWorkflowBar caseInfo={caseInfo} current={tab} onNavigate={setTab} />
+        )}
         {tab === "cases" && (
           <CasesView
             cases={cases}
             current={caseId}
+            caseInfo={caseInfo}
+            materials={materials}
+            transactions={allTransactions}
+            versions={versions}
+            seeds={seeds}
+            onUpload={() => setTab("materials")}
             onOpen={(id) => {
-              setCaseId(id);
-              setTab("analysis");
+              changeCase(id, false);
             }}
             onCreate={async (value) => {
               const created = await api.createCase(value);
-              await loadCases();
+              setCases((current) =>
+                current.some((item) => item.case_id === created.case_id)
+                  ? current
+                  : [...current, created],
+              );
+              clearSelection();
               setCaseId(created.case_id);
-              notify("案件已建立");
+              setTab("materials");
+              notify("案件已建立，已进入材料接收");
             }}
           />
         )}
@@ -281,6 +354,9 @@ export default function App() {
                 const result: any = await api.parseMaterial(caseId, id, true);
                 notify(result.material.status === "failed" ? "材料建模失败，请查看错误" : `材料建模完成，生成 ${result.material.draft_count || 0} 笔草稿`);
                 await reload();
+                if (result.material.status !== "failed" && result.material.draft_count > 0) {
+                  setTab("review");
+                }
               } catch (e: any) {
                 notify(e.message);
               } finally {
@@ -293,6 +369,7 @@ export default function App() {
           <ReviewView
             caseId={caseId}
             transactions={transactions}
+            materials={materials}
             total={total}
             status={status}
             setStatus={setStatus}
@@ -323,7 +400,7 @@ export default function App() {
         {tab === "seeds" && (
           <SeedsView
             caseInfo={caseInfo}
-            transactions={transactions}
+            transactions={allTransactions}
             seeds={seeds}
             onCreate={async (tx, victim) => {
               await api.createSeed(caseId, {
@@ -334,6 +411,22 @@ export default function App() {
               });
               notify("涉诈起点已确认");
               await reload();
+            }}
+            onCancel={async (seed) => {
+              setSeeds((current) =>
+                current.filter((item) => item.seed_id !== seed.seed_id),
+              );
+              try {
+                await api.deleteSeed(caseId, seed.seed_id);
+                notify("涉诈起点已取消");
+              } catch (error: any) {
+                setSeeds((current) =>
+                  current.some((item) => item.seed_id === seed.seed_id)
+                    ? current
+                    : [...current, seed],
+                );
+                notify(error.message || "涉诈起点取消失败");
+              }
             }}
           />
         )}
@@ -353,19 +446,13 @@ export default function App() {
             currentEdge={currentEdge}
             transactions={relatedTransactions}
             total={total}
-            layout={layout}
-            setLayout={setLayout}
             attribution={attribution}
             setAttribution={setAttribution}
             attributionData={attributionData}
             playing={playing}
             setPlaying={setPlaying}
             tick={tick}
-            clear={() => {
-              setSelectedNode(null);
-              setSelectedEdge(null);
-              setSelectedTx(null);
-            }}
+            clear={clearSelection}
             caseId={caseId}
           />
         )}
@@ -380,14 +467,60 @@ export default function App() {
   );
 }
 
+function CaseWorkflowBar({
+  caseInfo,
+  current,
+  onNavigate,
+}: {
+  caseInfo: CaseRecord;
+  current: string;
+  onNavigate: (tab: string) => void;
+}) {
+  const steps = [
+    ["materials", "材料接收"],
+    ["review", "流水校核"],
+    ["seeds", "确认起点"],
+    ["analysis", "资金研判"],
+  ] as const;
+  return (
+    <div className="case-workflow" aria-label="案件工作流程">
+      <strong>{caseInfo.case_number} · {caseInfo.name}</strong>
+      <div>
+        {steps.map(([id, label], index) => (
+          <button
+            key={id}
+            className={current === id ? "active" : ""}
+            aria-label={`进入${label}`}
+            onClick={() => onNavigate(id)}
+          >
+            <span>{index + 1}</span>{label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function CasesView({
   cases,
   current,
+  caseInfo,
+  materials,
+  transactions,
+  versions,
+  seeds,
+  onUpload,
   onOpen,
   onCreate,
 }: {
   cases: CaseRecord[];
   current: string;
+  caseInfo: CaseRecord | null;
+  materials: Material[];
+  transactions: Transaction[];
+  versions: Version[];
+  seeds: Seed[];
+  onUpload: () => void;
   onOpen: (id: string) => void;
   onCreate: (v: unknown) => void;
 }) {
@@ -395,8 +528,15 @@ function CasesView({
     case_number: "",
     name: "",
     victim_name: "",
+    victim_accounts: "",
     reported_loss: "",
   });
+  const activeCase = caseInfo?.case_id === current
+    ? caseInfo
+    : cases.find((item) => item.case_id === current) || null;
+  const pendingReview = transactions.filter(
+    (transaction) => transaction.review_status !== "confirmed" && transaction.review_status !== "rejected",
+  ).length;
   return (
     <div className="page scroll">
       <PageTitle
@@ -415,7 +555,10 @@ function CasesView({
               ? [
                   {
                     name: form.victim_name,
-                    accounts: [],
+                    accounts: form.victim_accounts
+                      .split(/[,，;；\s]+/)
+                      .map((account) => account.trim())
+                      .filter(Boolean),
                     reported_loss: Number(form.reported_loss) || 0,
                   },
                 ]
@@ -442,6 +585,11 @@ function CasesView({
           onChange={(e) => setForm({ ...form, victim_name: e.target.value })}
         />
         <input
+          placeholder="受害人付款账号"
+          value={form.victim_accounts}
+          onChange={(e) => setForm({ ...form, victim_accounts: e.target.value })}
+        />
+        <input
           type="number"
           placeholder="报案损失"
           value={form.reported_loss}
@@ -449,6 +597,27 @@ function CasesView({
         />
         <button className="primary">建立案件</button>
       </form>
+      {activeCase && (
+        <section className="case-overview" aria-label="当前案件概览">
+          <div className="case-overview-title">
+            <span>{activeCase.case_number}</span>
+            <h2>{activeCase.name}</h2>
+            <p>
+              {activeCase.victims.map((victim) => victim.name).join("、") || "未登记受害人"}
+              {" · "}研判状态：进行中
+            </p>
+          </div>
+          <div className="case-overview-metrics">
+            <div><span>案件材料</span><b>{materials.length}</b></div>
+            <div><span>待校核流水</span><b>{pendingReview}</b></div>
+            <div><span>确认版本</span><b>{versions.length}</b></div>
+            <div><span>已确认起点</span><b>{seeds.length}</b></div>
+          </div>
+          <button className="primary" onClick={onUpload}>
+            <Upload size={15} />上传本案材料
+          </button>
+        </section>
+      )}
       <div className="case-list">
         {cases.map((c) => (
           <article
@@ -465,7 +634,7 @@ function CasesView({
             </div>
             <span className="status ok">研判中</span>
             <button className="command" onClick={() => onOpen(c.case_id)}>
-              打开研判 <ChevronRight size={14} />
+              进入案件 <ChevronRight size={14} />
             </button>
           </article>
         ))}
@@ -558,6 +727,7 @@ function MaterialsView({
 function ReviewView({
   caseId,
   transactions,
+  materials,
   total,
   status,
   setStatus,
@@ -569,6 +739,7 @@ function ReviewView({
 }: {
   caseId: string;
   transactions: Transaction[];
+  materials: Material[];
   total: number;
   status: string;
   setStatus: (s: string) => void;
@@ -608,6 +779,7 @@ function ReviewView({
         onSelect={onSelect}
         review
         onConfirm={onConfirm}
+        materials={materials}
       />
       <div className="version-strip">
         <b>确认版本</b>
@@ -628,13 +800,37 @@ function SeedsView({
   transactions,
   seeds,
   onCreate,
+  onCancel,
 }: {
   caseInfo: CaseRecord | null;
   transactions: Transaction[];
   seeds: Seed[];
   onCreate: (t: Transaction, v: string) => void;
+  onCancel: (seed: Seed) => void;
 }) {
-  const victim = caseInfo?.victims[0];
+  const [nameQuery, setNameQuery] = useState("");
+  const victims = caseInfo?.victims || [];
+  const victimAccounts = new Map(
+    victims.flatMap((item) =>
+      item.accounts.map((account) => [
+        account.replace(/[^a-zA-Z0-9]/g, ""),
+        item,
+      ] as const),
+    ),
+  );
+  const candidates = transactions.filter(
+    (transaction) =>
+      transaction.review_status === "confirmed" &&
+      victimAccounts.has(transaction.payer_account.replace(/[^a-zA-Z0-9]/g, "")),
+  );
+  const visibleCandidates = candidates.filter((transaction) => {
+    const query = nameQuery.trim().toLowerCase();
+    return (
+      !query ||
+      transaction.payer_name.toLowerCase().includes(query) ||
+      transaction.payee_name.toLowerCase().includes(query)
+    );
+  });
   return (
     <div className="page scroll">
       <PageTitle
@@ -660,8 +856,22 @@ function SeedsView({
         <h2>候选转账</h2>
         <span>从已确认流水选择</span>
       </div>
+      <div className="seed-search">
+        <label htmlFor="seed-name-query">姓名模糊查询</label>
+        <input
+          id="seed-name-query"
+          placeholder="输入付款人或收款人姓名"
+          value={nameQuery}
+          onChange={(event) => setNameQuery(event.target.value)}
+        />
+      </div>
       <div className="seed-list">
-        {transactions.slice(0, 24).map((t) => (
+        {visibleCandidates.slice(0, 24).map((t) => {
+          const seed = seeds.find((item) => item.transaction_id === t.transaction_id);
+          const payingVictim = victimAccounts.get(
+            t.payer_account.replace(/[^a-zA-Z0-9]/g, ""),
+          );
+          return (
           <div className="seed-row" key={t.transaction_id}>
             <div>
               <b>
@@ -675,18 +885,21 @@ function SeedsView({
             <strong>{money(t.amount)}</strong>
             <button
               className="command"
-              disabled={
-                !victim ||
-                seeds.some((s) => s.transaction_id === t.transaction_id)
+              disabled={!payingVictim}
+              onClick={() =>
+                seed
+                  ? onCancel(seed)
+                  : payingVictim && onCreate(t, payingVictim.victim_id)
               }
-              onClick={() => victim && onCreate(t, victim.victim_id)}
             >
-              {seeds.some((s) => s.transaction_id === t.transaction_id)
-                ? "已确认"
-                : "设为起点"}
+              {seed ? "已确认（点击取消）" : "设为起点"}
             </button>
           </div>
-        ))}
+          );
+        })}
+        {!visibleCandidates.length && (
+          <div className="empty-state">暂无符合条件的已确认受害人付款流水</div>
+        )}
       </div>
     </div>
   );
@@ -707,8 +920,6 @@ type AnalysisProps = {
   currentEdge: any;
   transactions: Transaction[];
   total: number;
-  layout: string;
-  setLayout: (s: string) => void;
   attribution: string;
   setAttribution: (s: string) => void;
   attributionData: any;
@@ -881,16 +1092,6 @@ function AnalysisView(p: AnalysisProps) {
               <option value="proportional">比例分摊</option>
             </select>
           </label>
-          <label>
-            图布局
-            <select
-              value={p.layout}
-              onChange={(e) => p.setLayout(e.target.value)}
-            >
-              <option value="layered">分层穿透</option>
-              <option value="radial">环形关系</option>
-            </select>
-          </label>
           <div className="attribution-note">
             <ShieldAlert size={15} />
             <span>
@@ -932,7 +1133,6 @@ function AnalysisView(p: AnalysisProps) {
           selectedEdge={p.selectedEdge}
           onNode={p.selectNode}
           onEdge={p.selectEdge}
-          layout={p.layout}
           playing={p.playing}
           playTick={p.tick}
         />
@@ -1000,6 +1200,8 @@ function AnalysisView(p: AnalysisProps) {
                 {traceResult&&<div className="trace-result"><span>上游 {traceResult.upstream.length} · 下游 {traceResult.downstream.length}</span><span>最短路径 {traceResult.shortest_path.length?traceResult.shortest_path.join(' → '):'未指定或未发现'}</span><span>回流环路 {traceResult.cycles.length} 条</span></div>}
               </div>
             </>
+          ) : p.selectedTx ? (
+            <TransactionEvidence tx={p.selectedTx} />
           ) : p.currentEdge ? (
             <>
               <div className="identity">
@@ -1013,8 +1215,6 @@ function AnalysisView(p: AnalysisProps) {
               <Metric label="原始笔数" value={`${p.currentEdge.count} 笔`} />
               <Metric label="证据状态" value="已确认流水" />
             </>
-          ) : p.selectedTx ? (
-            <TransactionEvidence tx={p.selectedTx} />
           ) : (
             <div className="empty-inspector">
               <Gauge size={28} />
@@ -1030,9 +1230,9 @@ function AnalysisView(p: AnalysisProps) {
           resizeStart.current = {
             y: event.clientY,
             height: graphHeight,
-            maximum: Math.max(
+            maximum: maximumGraphHeight(
+              analysisLayout.current?.clientHeight || 0,
               180,
-              (analysisLayout.current?.clientHeight || 0) - 188,
             ),
           };
           event.currentTarget.setPointerCapture(event.pointerId);
@@ -1122,12 +1322,14 @@ function TransactionTable({
   onSelect,
   review = false,
   onConfirm,
+  materials = [],
 }: {
   rows: Transaction[];
   selected: string | null;
   onSelect: (t: Transaction) => void;
   review?: boolean;
   onConfirm?: (t: Transaction) => void;
+  materials?: Material[];
 }) {
   return (
     <div className="table-scroll">
@@ -1148,6 +1350,7 @@ function TransactionTable({
             <th>渠道</th>
             <th>摘要</th>
             <th>地区</th>
+            {review && <th>数据来源</th>}
             {review && <th>校核</th>}
           </tr>
         </thead>
@@ -1174,6 +1377,14 @@ function TransactionTable({
               <td>{tx.channel}</td>
               <td>{tx.summary}</td>
               <td>{tx.region}</td>
+              {review && (
+                <td
+                  className="source-cell"
+                  title={transactionSourceLabel(tx, materials)}
+                >
+                  {transactionSourceLabel(tx, materials)}
+                </td>
+              )}
               {review && (
                 <td>
                   <button

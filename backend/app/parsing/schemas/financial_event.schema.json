@@ -1,0 +1,176 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "financial_event_v1",
+  "title": "FundTrace Financial Event",
+  "description": "从银行、支付平台、POS、ATM等材料提取的统一资金事件。只允许材料中可观察或明确标记缺失的字段。",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "record_type", "event", "evidence", "extraction"],
+  "properties": {
+    "schema_version": {
+      "const": "financial_event_v1",
+      "description": "统一资金事件契约版本。"
+    },
+    "record_type": {
+      "description": "业务记录类型，不按银行或文件格式分类。",
+      "enum": [
+        "bank_transfer",
+        "payment_order",
+        "card_payment",
+        "cash_withdrawal",
+        "cash_deposit",
+        "recharge",
+        "withdrawal",
+        "refund",
+        "reversal",
+        "fee",
+        "interest",
+        "settlement",
+        "split",
+        "aggregation",
+        "balance_snapshot",
+        "account_profile",
+        "unknown"
+      ]
+    },
+    "event": { "$ref": "#/$defs/event" },
+    "evidence": { "$ref": "#/$defs/evidence" },
+    "extraction": { "$ref": "#/$defs/extraction" }
+  },
+  "$defs": {
+    "nullableString": {
+      "type": ["string", "null"]
+    },
+    "nullableNumber": {
+      "type": ["number", "null"]
+    },
+    "entity": {
+      "type": ["object", "null"],
+      "description": "资金事件的一侧实体；账号缺失时保留名称、终端或未知状态，不得补造账号。",
+      "additionalProperties": false,
+      "properties": {
+        "entity_type": {
+          "enum": [
+            "personal_account",
+            "corporate_account",
+            "bank_account",
+            "payment_wallet",
+            "merchant",
+            "pos_terminal",
+            "atm",
+            "platform_settlement",
+            "cash_endpoint",
+            "unknown"
+          ]
+        },
+        "account": { "$ref": "#/$defs/nullableString" },
+        "masked_account": { "$ref": "#/$defs/nullableString" },
+        "name": { "$ref": "#/$defs/nullableString" },
+        "institution": { "$ref": "#/$defs/nullableString" },
+        "bank": { "$ref": "#/$defs/nullableString" },
+        "resolution": {
+          "enum": ["exact", "masked", "name_only", "terminal_only", "unknown"]
+        }
+      },
+      "required": ["entity_type", "account", "masked_account", "name", "institution", "bank", "resolution"]
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "event_time",
+        "amount",
+        "currency",
+        "direction",
+        "source_entity",
+        "target_entity",
+        "status"
+      ],
+      "properties": {
+        "event_time": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "材料显示的交易发生时间；无法确认时为null。"
+        },
+        "posting_time": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "银行记账或清算时间，与交易发生时间分开保存。"
+        },
+        "amount": {
+          "type": ["number", "null"],
+          "exclusiveMinimum": 0,
+          "description": "资金事件金额，统一为正数；方向由direction表示。"
+        },
+        "currency": {
+          "type": ["string", "null"],
+          "pattern": "^[A-Z]{3}$",
+          "description": "ISO 4217三位币种代码；无法确认时为null。"
+        },
+        "direction": {
+          "enum": ["in", "out", "neutral", "unknown"],
+          "description": "相对于材料所述本方账户的资金方向。"
+        },
+        "source_entity": { "$ref": "#/$defs/entity" },
+        "target_entity": { "$ref": "#/$defs/entity" },
+        "status": {
+          "enum": ["success", "pending", "failed", "returned", "cancelled", "reversed", "unknown"]
+        },
+        "reference_id": { "$ref": "#/$defs/nullableString" },
+        "serial_number": { "$ref": "#/$defs/nullableString" },
+        "summary": { "$ref": "#/$defs/nullableString" },
+        "channel": { "$ref": "#/$defs/nullableString" },
+        "region": { "$ref": "#/$defs/nullableString" },
+        "fee": { "$ref": "#/$defs/nullableNumber" },
+        "balance_before": { "$ref": "#/$defs/nullableNumber" },
+        "balance_after": { "$ref": "#/$defs/nullableNumber" },
+        "order_id": { "$ref": "#/$defs/nullableString" },
+        "batch_id": { "$ref": "#/$defs/nullableString" },
+        "merchant_id": { "$ref": "#/$defs/nullableString" },
+        "merchant_name": { "$ref": "#/$defs/nullableString" },
+        "terminal_id": { "$ref": "#/$defs/nullableString" },
+        "authorization_code": { "$ref": "#/$defs/nullableString" },
+        "related_transaction_id": { "$ref": "#/$defs/nullableString" },
+        "relation_type": {
+          "type": ["string", "null"],
+          "enum": [null, "same_business_event", "settles", "refunds", "reverses", "charges_fee", "corroborates"]
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_file_id"],
+      "properties": {
+        "source_file_id": { "type": "string", "minLength": 1 },
+        "archive_member_path": { "$ref": "#/$defs/nullableString" },
+        "page_number": { "type": ["integer", "null"], "minimum": 1 },
+        "sheet_name": { "$ref": "#/$defs/nullableString" },
+        "table_number": { "type": ["integer", "null"], "minimum": 1 },
+        "paragraph_number": { "type": ["integer", "null"], "minimum": 1 },
+        "row_number": { "type": ["integer", "null"], "minimum": 1 },
+        "region": {
+          "type": ["array", "null"],
+          "items": { "type": "number" },
+          "minItems": 4,
+          "maxItems": 4
+        },
+        "raw_text": { "$ref": "#/$defs/nullableString" }
+      }
+    },
+    "extraction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["method", "status"],
+      "properties": {
+        "method": { "enum": ["structured", "model", "hybrid", "manual"] },
+        "status": { "enum": ["extracted", "partial", "needs_manual_review", "failed"] },
+        "confidence": { "type": ["number", "null"], "minimum": 0, "maximum": 1 },
+        "errors": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    }
+  }
+}

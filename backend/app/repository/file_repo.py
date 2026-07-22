@@ -249,6 +249,7 @@ class FileRepository(Repository):
             for record in records:
                 row = record.model_dump(mode="json")
                 row["source"] = json.dumps(row["source"], ensure_ascii=False)
+                row["evidence_locations"] = json.dumps(row["evidence_locations"], ensure_ascii=False)
                 row["confidence"] = json.dumps(row["confidence"], ensure_ascii=False)
                 writer.writerow(row)
         version = VersionRecord(
@@ -300,6 +301,28 @@ class FileRepository(Repository):
                 if line
             ]
         )
+
+    def delete_seed(self, case_id: str, seed_id: str) -> bool:
+        path = self.case_dir(case_id) / "analysis" / "seeds.jsonl"
+        if not path.exists():
+            return False
+        seeds = [
+            SeedRecord.model_validate_json(line)
+            for line in path.read_text("utf-8").splitlines()
+            if line
+        ]
+        remaining = [seed for seed in seeds if seed.seed_id != seed_id]
+        if len(remaining) == len(seeds):
+            return False
+        path.write_text(
+            "".join(seed.model_dump_json() + "\n" for seed in remaining),
+            encoding="utf-8",
+        )
+        self.append_audit(
+            case_id,
+            {"event": "seed_cancelled", "seed_id": seed_id},
+        )
+        return True
 
     @staticmethod
     def _write_json(path: Path, value: dict) -> None:

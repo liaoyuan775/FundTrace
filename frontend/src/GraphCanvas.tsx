@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import { Graph } from "@antv/g6";
 import type { GraphData } from "./types";
 import { buildFocusStates, chronologicalEdgeIds } from "./graph-state";
+import { buildHierarchicalLayout } from "./hierarchical-layout";
+import { GRAPH_PALETTE } from "./theme";
 
 type Props = {
   data: GraphData;
@@ -9,17 +11,27 @@ type Props = {
   selectedEdge: string | null;
   onNode: (id: string) => void;
   onEdge: (id: string) => void;
-  layout: string;
   playing: boolean;
   playTick: number;
 };
+function priorityBorder(level?: string) {
+  if (level === "一级重点") {
+    return { stroke: GRAPH_PALETTE.risk, lineWidth: 4 };
+  }
+  if (level === "二级重点") {
+    return { stroke: GRAPH_PALETTE.mediumRisk, lineWidth: 3 };
+  }
+  if (level === "三级关注") {
+    return { stroke: GRAPH_PALETTE.outgoing, lineWidth: 2 };
+  }
+  return { stroke: GRAPH_PALETTE.labelBackground, lineWidth: 1 };
+}
 export default function GraphCanvas({
   data,
   selectedNode,
   selectedEdge,
   onNode,
   onEdge,
-  layout,
   playing,
   playTick,
 }: Props) {
@@ -34,8 +46,12 @@ export default function GraphCanvas({
     graph.current?.destroy();
     graph.current = null;
     let cancelled = false;
+    const hierarchy = buildHierarchicalLayout(data);
     const options: any = {
       container: host.current,
+      background: GRAPH_PALETTE.canvas,
+      cursor: "grab",
+      autoResize: true,
       autoFit: { type: "view", options: { when: "always" } },
       zoomRange: [0.08, 8],
       padding: 34,
@@ -46,54 +62,60 @@ export default function GraphCanvas({
           style: {
             labelText: n.label,
             labelFontSize: 10,
-            labelFill: "#d8dbd7",
+            labelFill: GRAPH_PALETTE.label,
             labelBackground: true,
-            labelBackgroundFill: "#111413",
+            labelBackgroundFill: GRAPH_PALETTE.labelBackground,
+            labelPlacement: "right",
+            labelOffsetX: 7,
+            x: hierarchy.positions[n.id].x,
+            y: hierarchy.positions[n.id].y,
             size: 10 + Math.min(16, n.risk / 8),
-            fill: n.risk > 88 ? "#f04438" : n.risk > 75 ? "#e4a72c" : "#59b7bf",
-            stroke: "#fffdf7",
-            lineWidth: 1,
+            fill: GRAPH_PALETTE.node,
+            ...priorityBorder(n.priority_level),
             opacity: 1,
           },
         })),
-        edges: data.edges.map((e) => ({
-          id: e.id,
-          source: e.source,
-          target: e.target,
-          data: e,
-          style: {
-            stroke: "#69716c",
-            lineWidth: Math.min(4, 1 + Math.log10(e.amount || 1) / 2.5),
-            opacity: 0.65,
-            endArrow: true,
-          },
-        })),
+        edges: data.edges.map((e) => {
+          const primary = hierarchy.primaryEdgeIds.has(e.id);
+          return {
+            id: e.id,
+            source: e.source,
+            target: e.target,
+            type: primary ? "polyline" : "cubic-horizontal",
+            data: e,
+            style: {
+              stroke: GRAPH_PALETTE.edge,
+              lineWidth: 1.5,
+              opacity: 0.68,
+              endArrow: true,
+            },
+          };
+        }),
       },
       node: {
         state: {
-          selected: { stroke: "#fffdf7", lineWidth: 4, opacity: 1 },
-          "incoming-neighbor": { stroke: "#59b7bf", lineWidth: 3, opacity: 1 },
-          "outgoing-neighbor": { stroke: "#e4a72c", lineWidth: 3, opacity: 1 },
-          "edge-endpoint": { stroke: "#f04438", lineWidth: 3, opacity: 1 },
-          "playing-source": { fill: "#e4a72c", stroke: "#fff7cf", lineWidth: 4, opacity: 1 },
-          "playing-target": { fill: "#f04438", stroke: "#fff7cf", lineWidth: 4, opacity: 1 },
+          selected: { stroke: GRAPH_PALETTE.selected, lineWidth: 4, opacity: 1 },
+          "incoming-neighbor": { stroke: GRAPH_PALETTE.incoming, lineWidth: 3, opacity: 1 },
+          "outgoing-neighbor": { stroke: GRAPH_PALETTE.outgoing, lineWidth: 3, opacity: 1 },
+          "edge-endpoint": { stroke: GRAPH_PALETTE.selected, lineWidth: 3, opacity: 1 },
+          "playing-source": { fill: GRAPH_PALETTE.outgoing, stroke: GRAPH_PALETTE.labelBackground, lineWidth: 4, opacity: 1 },
+          "playing-target": { fill: GRAPH_PALETTE.selected, stroke: GRAPH_PALETTE.labelBackground, lineWidth: 4, opacity: 1 },
           inactive: { opacity: 0.16 },
         },
       },
       edge: {
         state: {
-          selected: { stroke: "#f04438", lineWidth: 5, opacity: 1 },
-          incoming: { stroke: "#59b7bf", lineWidth: 4, opacity: 1 },
-          outgoing: { stroke: "#e4a72c", lineWidth: 4, opacity: 1 },
-          playing: { stroke: "#fff06a", lineWidth: 6, opacity: 1 },
+          selected: { stroke: GRAPH_PALETTE.selected, lineWidth: 5, opacity: 1 },
+          incoming: { stroke: GRAPH_PALETTE.incoming, lineWidth: 4, opacity: 1 },
+          outgoing: { stroke: GRAPH_PALETTE.outgoing, lineWidth: 4, opacity: 1 },
+          playing: { stroke: GRAPH_PALETTE.playing, lineWidth: 6, opacity: 1 },
           inactive: { opacity: 0.06 },
         },
       },
-      layout:
-        layout === "radial"
-          ? { type: "radial", unitRadius: 90, preventOverlap: true }
-          : { type: "antv-dagre", rankdir: "LR", ranksep: 110, nodesep: 34 },
-      behaviors: [{ type: "drag-canvas" }, { type: "zoom-canvas", sensitivity: 1.4 }, "drag-element"],
+      behaviors: [
+        { type: "drag-canvas", enable: true },
+        { type: "zoom-canvas", sensitivity: 1.4 },
+      ],
       animation: false,
     };
     const instance = new Graph(options);
@@ -113,7 +135,7 @@ export default function GraphCanvas({
       instance.destroy();
       if (graph.current === instance) graph.current = null;
     };
-  }, [data, layout]);
+  }, [data]);
   useEffect(() => {
     const instance = graph.current;
     if (!instance) return;

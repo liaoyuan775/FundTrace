@@ -10,7 +10,8 @@ from ..analysis.core import attribute_mixed_funds, build_graph, shortest_path, t
 from ..demo.data import demo_case, demo_transactions
 from ..models import CaseCreate, CaseRecord, DraftUpdate, SeedCreate, SeedRecord, SourceLocation, TransactionRecord, VersionCreate
 from ..parsing.extractors import UnsupportedMaterialError, extract_material
-from ..parsing.normalization import normalize_structured_row
+from ..parsing.classification import classify_chunk
+from ..parsing.normalization import normalize_structured_row_with_status
 from ..repository.file_repo import FileRepository
 from .deps import get_qwen, get_repo, get_settings
 
@@ -130,6 +131,7 @@ def parse_material(
     # First pass: structured chunks inline (fast, no VLM needed)
     vlm_tasks = []
     for index, chunk in enumerate(chunks):
+        chunk["classification"] = classify_chunk(path, chunk)
         source = SourceLocation(
             source_file_id=file_id,
             archive_member_path=chunk.get("archive_member_path"),
@@ -141,10 +143,19 @@ def parse_material(
             region=chunk.get("region"),
         )
         if chunk.get("row_data"):
-            structured = normalize_structured_row(chunk["row_data"], source)
+            structured, rejection = normalize_structured_row_with_status(chunk["row_data"], source)
             if structured:
                 structured.source = source
                 extracted_records.append(structured)
+            elif rejection:
+                errors.append({
+                    "chunk_index": index,
+                    "page_number": chunk.get("page_number"),
+                    "sheet_name": chunk.get("sheet_name"),
+                    "row_number": chunk.get("row_number"),
+                    "error": rejection,
+                    "status": "needs_manual_review",
+                })
         elif use_model:
             vlm_tasks.append((index, chunk, source))
 
@@ -155,18 +166,29 @@ def parse_material(
             text = chunk.get("text", "")
             image = Path(chunk["image_path"]) if chunk.get("image_path") else None
             try:
-                records = local_adapter.normalize(text, image)
+                if (
+                    chunk["classification"]["record_type"] == "unknown"
+                    and local_adapter.enabled
+                ):
+                    chunk["classification"] = local_adapter.classify(
+                        text, image
+                    ).model_dump()
+                records = local_adapter.normalize(
+                    text,
+                    image,
+                    chunk["classification"]["record_type"],
+                )
                 w = local_adapter.last_warning
                 rw = local_adapter.retry_warnings
-                return (index, records, w, rw, None)
+                return (index, records, w, rw, None, chunk, source)
             except RuntimeError as exc:
                 rw = local_adapter.retry_warnings
-                return (index, [], None, rw, str(exc))
+                return (index, [], None, rw, str(exc), chunk, source)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
             futures = [pool.submit(_vlm_parse, *t) for t in vlm_tasks]
             for future in concurrent.futures.as_completed(futures):
-                index, records, warning, retry_warnings, error = future.result()
+                index, records, warning, retry_warnings, error, chunk_obj, chunk_source = future.result()
                 if error:
                     chunk = chunks[index]
                     errors.append({
@@ -183,7 +205,6 @@ def parse_material(
                 for rw in retry_warnings:
                     if rw not in warnings:
                         warnings.append(rw)
-                _, chunk_obj, chunk_source = vlm_tasks[index]
                 for record in records:
                     record_source = chunk_source.model_copy(deep=True)
                     if record_source.table_number is not None:
@@ -195,8 +216,12 @@ def parse_material(
                         ]
                         record_source.row_number = matches[0] if len(matches) == 1 else None
                     record.source = record_source
+                    record.evidence_locations = [record_source.model_copy(deep=True)]
                     extracted_records.append(record)
     created = repo.reconcile_drafts_for_source(case_id, file_id, extracted_records, replace_missing=not errors) if extracted_records or use_model else []
+    # Persist classifications and any model-updated chunk metadata alongside
+    # the raw extraction so later audits can reproduce schema routing.
+    extracted.write_text(json.dumps(chunks, ensure_ascii=False, indent=2), "utf-8")
     if errors:
         status = "partial" if created else "failed"
     else:
@@ -302,17 +327,52 @@ def export_transactions(case_id: str, repo: FileRepository = Depends(get_repo)):
 
 # ── Seeds ──────────────────────────────────────────────────────────
 
+def _confirmed_records(repo: FileRepository, case_id: str) -> list[TransactionRecord]:
+    return [
+        record
+        for record in repo.list_drafts(case_id)
+        if record.review_status == "confirmed"
+    ]
+
+
 @router.post("/api/cases/{case_id}/seeds", status_code=201)
 def add_seed(case_id: str, payload: SeedCreate, repo: FileRepository = Depends(get_repo)):
+    try:
+        case = repo.get_case(case_id)
+    except KeyError:
+        raise HTTPException(404, "案件不存在")
+    victim = next(
+        (item for item in case.victims if item.victim_id == payload.victim_id),
+        None,
+    )
+    if victim is None:
+        raise HTTPException(409, "所选受害人不存在")
     record = next((x for x in repo.list_drafts(case_id) if x.transaction_id == payload.transaction_id), None)
     if not record or record.review_status != "confirmed":
         raise HTTPException(409, "起点必须来自已确认流水")
+    victim_accounts = {
+        "".join(character for character in account if character.isalnum())
+        for account in victim.accounts
+    }
+    if record.payer_account not in victim_accounts:
+        raise HTTPException(409, "起点流水的付款账号必须属于所选受害人")
     return repo.save_seed(case_id, SeedRecord(**payload.model_dump()))
 
 
 @router.get("/api/cases/{case_id}/seeds")
 def seeds(case_id: str, repo: FileRepository = Depends(get_repo)):
     return repo.list_seeds(case_id)
+
+
+@router.delete("/api/cases/{case_id}/seeds/{seed_id}")
+def delete_seed(case_id: str, seed_id: str, repo: FileRepository = Depends(get_repo)):
+    try:
+        repo.get_case(case_id)
+    except KeyError:
+        raise HTTPException(404, "案件不存在")
+    if not repo.delete_seed(case_id, seed_id):
+        raise HTTPException(404, "涉诈起点不存在")
+    return {"seed_id": seed_id, "status": "cancelled"}
 
 
 # ── Analysis ───────────────────────────────────────────────────────
@@ -330,22 +390,39 @@ def graph(
     date_to: str = "",
     repo: FileRepository = Depends(get_repo),
 ):
-    return build_graph(repo.list_drafts(case_id), query, min_amount, direction, channel, bank, region, date_from, date_to)
+    case = repo.get_case(case_id)
+    victim_accounts = {
+        "".join(character for character in account if character.isalnum())
+        for victim in case.victims
+        for account in victim.accounts
+    }
+    return build_graph(
+        _confirmed_records(repo, case_id),
+        query,
+        min_amount,
+        direction,
+        channel,
+        bank,
+        region,
+        date_from,
+        date_to,
+        victim_accounts,
+    )
 
 
 @router.get("/api/cases/{case_id}/analysis/path")
 def path(case_id: str, start: str, end: str, repo: FileRepository = Depends(get_repo)):
-    return {"path": shortest_path(repo.list_drafts(case_id), start, end)}
+    return {"path": shortest_path(_confirmed_records(repo, case_id), start, end)}
 
 
 @router.get("/api/cases/{case_id}/analysis/trace")
 def trace(case_id: str, start: str, end: str = "", hops: int = Query(3, ge=1, le=8), repo: FileRepository = Depends(get_repo)):
-    return trace_network(repo.list_drafts(case_id), start, end, hops)
+    return trace_network(_confirmed_records(repo, case_id), start, end, hops)
 
 
 @router.post("/api/cases/{case_id}/analysis/attribute")
 def attribute(case_id: str, source_account: str, victim_amount: float, preexisting_balance: float = 0, repo: FileRepository = Depends(get_repo)):
-    return attribute_mixed_funds(repo.list_drafts(case_id), source_account, victim_amount, preexisting_balance)
+    return attribute_mixed_funds(_confirmed_records(repo, case_id), source_account, victim_amount, preexisting_balance)
 
 
 # ── Demo ───────────────────────────────────────────────────────────

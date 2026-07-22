@@ -76,8 +76,10 @@ def demo_case() -> CaseRecord:
         name="星火专案·跨省电诈资金链",
         case_number="FZ-2026-0716-09",
         victims=[
-            Victim(name="受害人甲", accounts=["6217000000009001"], reported_loss=50000),
-            Victim(name="受害人乙", accounts=["6217000000009002"], reported_loss=86000),
+            Victim(name="王海涛", accounts=["62100000000000000"], reported_loss=449300),
+            Victim(name="李倩", accounts=["62110000000000001"], reported_loss=388300),
+            Victim(name="陈志强", accounts=["62120000000000002"], reported_loss=342900),
+            Victim(name="周晓燕", accounts=["62130000000000003"], reported_loss=472800),
         ],
     )
 

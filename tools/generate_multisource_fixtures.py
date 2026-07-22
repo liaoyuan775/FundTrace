@@ -22,6 +22,11 @@ FILE_SPECS = [
     ("10_案件资金流转摘录.docx", 8, 2),
 ]
 
+DISPLAY_HEADERS = [
+    "交易时间", "流水号", "付款账号", "付款户名", "收款账号",
+    "收款户名", "金额", "交易后余额", "渠道", "摘要",
+]
+
 
 def build_truth() -> dict:
     banks = ["甲银行长沙分行", "乙银行深圳分行", "丙银行厦门分行", "丁银行武汉分行", "戊银行南宁分行"]
@@ -135,7 +140,8 @@ def _rows(spec: dict, truth: dict) -> list[dict]:
 def _display_row(item: dict) -> list[str]:
     return [
         item["transaction_time"].replace("T", " "), item["serial_number"], item["payer_account"], item["payer_name"],
-        item["payee_account"], item["payee_name"], f'{item["amount"]:.2f}', item["channel"], item["summary"],
+        item["payee_account"], item["payee_name"], f'{item["amount"]:.2f}', f'{item["balance_after"]:.2f}',
+        item["channel"], item["summary"],
     ]
 
 
@@ -172,10 +178,9 @@ def _write_pdf(path: Path, rows: list[dict], title: str) -> None:
     title_style = ParagraphStyle("ChineseTitle", parent=styles["Title"], fontName="STSong-Light", fontSize=16, alignment=TA_CENTER)
     document = SimpleDocTemplate(str(path), pagesize=landscape(A4), leftMargin=24, rightMargin=24, topMargin=24, bottomMargin=24)
     elements = [Paragraph(title, title_style)]
-    headers = ["交易时间", "流水号", "付款账号", "付款户名", "收款账号", "收款户名", "金额", "渠道", "摘要"]
     for start in range(0, len(rows), 8):
-        data = [headers] + [_display_row(item) for item in rows[start:start + 8]]
-        table = Table(data, repeatRows=1, colWidths=[95, 100, 105, 55, 105, 70, 58, 60, 70])
+        data = [DISPLAY_HEADERS] + [_display_row(item) for item in rows[start:start + 8]]
+        table = Table(data, repeatRows=1, colWidths=[88, 90, 94, 48, 94, 58, 50, 60, 52, 58])
         table.setStyle(TableStyle([
             ("FONTNAME", (0, 0), (-1, -1), "STSong-Light"), ("FONTSIZE", (0, 0), (-1, -1), 7.5),
             ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#173B57")), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -199,9 +204,8 @@ def _write_docx(path: Path, rows: list[dict], title: str) -> None:
     section.left_margin = section.right_margin = Cm(1.2); section.top_margin = section.bottom_margin = Cm(1.2)
     heading = document.add_paragraph(); heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
     run = heading.add_run(title); run.bold = True; run.font.name = "Microsoft YaHei"; run.font.size = Pt(15)
-    headers = ["交易时间", "流水号", "付款账号", "付款户名", "收款账号", "收款户名", "金额", "渠道", "摘要"]
-    table = document.add_table(rows=1, cols=len(headers)); table.style = "Light Shading Accent 1"
-    for index, header in enumerate(headers): table.rows[0].cells[index].text = header
+    table = document.add_table(rows=1, cols=len(DISPLAY_HEADERS)); table.style = "Light Shading Accent 1"
+    for index, header in enumerate(DISPLAY_HEADERS): table.rows[0].cells[index].text = header
     for item in rows:
         cells = table.add_row().cells
         for index, value in enumerate(_display_row(item)): cells[index].text = value
@@ -216,20 +220,19 @@ def _write_docx(path: Path, rows: list[dict], title: str) -> None:
 def _write_image(path: Path, rows: list[dict], title: str, noisy: bool) -> None:
     from PIL import Image, ImageDraw, ImageEnhance, ImageFont
 
-    width, row_height = 2200, 76
+    width, row_height = 2520, 76
     height = 150 + row_height * (len(rows) + 1)
     image = Image.new("RGB", (width, height), "#F4F7FA")
     draw = ImageDraw.Draw(image)
     font_path = Path("C:/Windows/Fonts/msyh.ttc")
     title_font = ImageFont.truetype(str(font_path), 34); header_font = ImageFont.truetype(str(font_path), 22); body_font = ImageFont.truetype(str(font_path), 20)
     draw.rectangle((0, 0, width, 105), fill="#153B5B"); draw.text((42, 28), title, font=title_font, fill="white")
-    headers = ["交易时间", "流水号", "付款账号", "付款户名", "收款账号", "收款户名", "金额", "渠道", "摘要"]
-    widths = [260, 250, 270, 150, 270, 180, 140, 160, 190]
+    widths = [260, 250, 270, 150, 270, 260, 140, 170, 160, 190]
     x_positions = [30]
     for value in widths[:-1]: x_positions.append(x_positions[-1] + value)
     top = 120
     draw.rectangle((20, top, width - 20, top + row_height), fill="#DDE7EF")
-    for index, header in enumerate(headers): draw.text((x_positions[index], top + 22), header, font=header_font, fill="#173B57")
+    for index, header in enumerate(DISPLAY_HEADERS): draw.text((x_positions[index], top + 22), header, font=header_font, fill="#173B57")
     for row_index, item in enumerate(rows):
         y = top + row_height * (row_index + 1)
         draw.rectangle((20, y, width - 20, y + row_height), fill="#FFFFFF" if row_index % 2 == 0 else "#EEF3F6")

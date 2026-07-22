@@ -27,6 +27,23 @@ FIELD_ALIASES = {
 }
 
 
+def map_structured_fields(row: dict) -> dict:
+    """Map known source columns to the canonical field names without losing raw values."""
+    mapped = {field: _lookup(row, field) for field in FIELD_ALIASES}
+    if mapped["debit_credit"] in (None, ""):
+        if _lookup(row, "amount") == "" and _lookup(row, "debit_credit") == "":
+            pass
+        income = row.get("收入金额", row.get("贷方金额", ""))
+        expense = row.get("支出金额", row.get("借方金额", ""))
+        if income not in (None, ""):
+            mapped["amount"] = income
+            mapped["debit_credit"] = "贷"
+        elif expense not in (None, ""):
+            mapped["amount"] = expense
+            mapped["debit_credit"] = "借"
+    return mapped
+
+
 def _normalized_key(value: object) -> str:
     return re.sub(r"[\s_\-（）()：:]", "", str(value)).lower()
 
@@ -77,35 +94,47 @@ def _parse_amount(value: object) -> float | None:
 
 
 def normalize_structured_row(row: dict, source: SourceLocation) -> TransactionRecord | None:
-    transaction_time = _parse_datetime(_lookup(row, "transaction_time"))
-    payer_account = str(_lookup(row, "payer_account")).strip()
-    payee_account = str(_lookup(row, "payee_account")).strip()
-    amount = _parse_amount(_lookup(row, "amount"))
-    if not transaction_time or not payer_account or not payee_account or not amount:
-        return None
+    record, _ = normalize_structured_row_with_status(row, source)
+    return record
+
+
+def normalize_structured_row_with_status(
+    row: dict, source: SourceLocation
+) -> tuple[TransactionRecord | None, str | None]:
+    mapped = map_structured_fields(row)
+    transaction_time = _parse_datetime(mapped.get("transaction_time"))
+    payer_account = str(mapped.get("payer_account") or "").strip()
+    payee_account = str(mapped.get("payee_account") or "").strip()
+    amount = _parse_amount(mapped.get("amount"))
+    if not payer_account or not payee_account:
+        return None, "缺少付款账号或收款账号"
+    if not transaction_time:
+        return None, "缺少或无法解析交易时间"
+    if not amount:
+        return None, "缺少或无法解析交易金额"
     balance = _parse_amount(_lookup(row, "balance_after"))
     return TransactionRecord(
         transaction_time=transaction_time,
-        serial_number=str(_lookup(row, "serial_number")).strip(),
+        serial_number=str(mapped.get("serial_number") or "").strip(),
         payer_account=payer_account,
-        payer_name=str(_lookup(row, "payer_name")).strip(),
-        payer_institution=str(_lookup(row, "payer_institution")).strip(),
-        payer_bank=str(_lookup(row, "payer_bank")).strip(),
+        payer_name=str(mapped.get("payer_name") or "").strip(),
+        payer_institution=str(mapped.get("payer_institution") or "").strip(),
+        payer_bank=str(mapped.get("payer_bank") or "").strip(),
         payee_account=payee_account,
-        payee_name=str(_lookup(row, "payee_name")).strip(),
-        payee_institution=str(_lookup(row, "payee_institution")).strip(),
-        payee_bank=str(_lookup(row, "payee_bank")).strip(),
-        debit_credit=str(_lookup(row, "debit_credit", "借")).strip() or "借",
-        currency=str(_lookup(row, "currency", "CNY")).strip() or "CNY",
+        payee_name=str(mapped.get("payee_name") or "").strip(),
+        payee_institution=str(mapped.get("payee_institution") or "").strip(),
+        payee_bank=str(mapped.get("payee_bank") or "").strip(),
+        debit_credit=str(mapped.get("debit_credit") or "借").strip() or "借",
+        currency=str(mapped.get("currency") or "CNY").strip() or "CNY",
         amount=amount,
         balance_after=balance,
-        channel=str(_lookup(row, "channel")).strip(),
-        summary=str(_lookup(row, "summary")).strip(),
-        region=str(_lookup(row, "region")).strip(),
-        transaction_type=str(_lookup(row, "transaction_type", "转账")).strip() or "转账",
+        channel=str(mapped.get("channel") or "").strip(),
+        summary=str(mapped.get("summary") or "").strip(),
+        region=str(mapped.get("region") or "").strip(),
+        transaction_type=str(mapped.get("transaction_type") or "转账").strip() or "转账",
         source=source,
         parser_name="structured",
         confidence={"structured": 1.0},
         review_status="pending",
         provenance="original",
-    )
+    ), None

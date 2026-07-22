@@ -87,6 +87,33 @@ def test_docx_table_is_extracted_as_one_header_aware_chunk(tmp_path):
     ]
 
 
+def test_docx_large_table_is_chunked_with_original_row_evidence(tmp_path):
+    path = tmp_path / "large-statement.docx"
+    document = Document()
+    table = document.add_table(rows=16, cols=3)
+    for column, value in enumerate(("交易时间", "流水号", "金额")):
+        table.rows[0].cells[column].text = value
+    for index in range(1, 16):
+        values = (f"2026-07-17 10:{index:02d}:00", f"T{index:03d}", f"{index * 100}.00")
+        for column, value in enumerate(values):
+            table.rows[index].cells[column].text = value
+    document.save(path)
+
+    chunks = extract_material(path)
+
+    assert len(chunks) == 2
+    assert [chunk["table_number"] for chunk in chunks] == [1, 1]
+    assert [chunk["text"].splitlines()[0] for chunk in chunks] == ["交易时间\t流水号\t金额"] * 2
+    assert [len(chunk["row_evidence"]) for chunk in chunks] == [8, 7]
+    assert chunks[0]["row_evidence"][0]["row_number"] == 2
+    assert chunks[0]["row_evidence"][-1]["row_number"] == 9
+    assert chunks[1]["row_evidence"][0] == {
+        "row_number": 10,
+        "text": "2026-07-17 10:09:00\tT009\t900.00",
+    }
+    assert chunks[1]["row_evidence"][-1]["row_number"] == 16
+
+
 def test_image_chunk_has_full_image_region(tmp_path):
     from PIL import Image
 

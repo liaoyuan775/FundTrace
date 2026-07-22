@@ -34,6 +34,18 @@ export function buildFocusStates(
     return { nodes, edges };
   }
 
+  if (selectedEdge) {
+    for (const node of data.nodes) nodes[node.id] = ["inactive"];
+    for (const edge of data.edges) edges[edge.id] = ["inactive"];
+    const active = data.edges.find((edge) => edge.id === selectedEdge);
+    if (active) {
+      edges[active.id] = ["selected"];
+      nodes[active.source] = ["edge-endpoint"];
+      nodes[active.target] = ["edge-endpoint"];
+    }
+    return { nodes, edges };
+  }
+
   if (selectedNode) {
     for (const node of data.nodes) nodes[node.id] = ["inactive"];
     for (const edge of data.edges) {
@@ -48,18 +60,6 @@ export function buildFocusStates(
       }
     }
     nodes[selectedNode] = ["selected"];
-    return { nodes, edges };
-  }
-
-  if (selectedEdge) {
-    for (const node of data.nodes) nodes[node.id] = ["inactive"];
-    for (const edge of data.edges) edges[edge.id] = ["inactive"];
-    const active = data.edges.find((edge) => edge.id === selectedEdge);
-    if (active) {
-      edges[active.id] = ["selected"];
-      nodes[active.source] = ["edge-endpoint"];
-      nodes[active.target] = ["edge-endpoint"];
-    }
   }
   return { nodes, edges };
 }

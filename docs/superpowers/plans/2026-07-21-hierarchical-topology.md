@@ -121,9 +121,9 @@ export function buildHierarchicalLayout(data: GraphData): HierarchicalLayout {
   const maximumLayerSize = Math.max(1, ...[...layers.values()].map((layer) => layer.length));
   const positions: HierarchicalLayout["positions"] = {};
   for (const [level, layer] of layers) {
-    const top = 60 + ((maximumLayerSize - layer.length) * 74) / 2;
+    const top = 60 + ((maximumLayerSize - layer.length) * 40) / 2;
     layer.forEach((id, index) => {
-      positions[id] = { x: 80 + level * 220, y: top + index * 74, depth: level };
+      positions[id] = { x: 80 + level * 260, y: top + index * 40, depth: level };
     });
   }
 
@@ -153,7 +153,7 @@ Expected: all hierarchical layout tests pass.
 - [ ] **Step 1: Change the graph configuration test to describe the new contract**
 
 ```ts
-expect(options.layout).toEqual({ type: "preset" });
+expect(options.layout).toBeUndefined();
 expect(options.cursor).toBe("grab");
 expect(options.behaviors).toEqual([
   { type: "drag-canvas", enable: true },
@@ -178,8 +178,8 @@ const hierarchy = buildHierarchicalLayout(data);
 style: {
   x: hierarchy.positions[n.id].x,
   y: hierarchy.positions[n.id].y,
-  labelPlacement: "bottom",
-  labelOffsetY: 7,
+  labelPlacement: "right",
+  labelOffsetX: 7,
 }
 
 type: hierarchy.primaryEdgeIds.has(e.id) ? "polyline" : "cubic-horizontal",
@@ -193,7 +193,6 @@ style: hierarchy.primaryEdgeIds.has(e.id)
 ```ts
 cursor: "grab",
 autoResize: true,
-layout: { type: "preset" },
 behaviors: [
   { type: "drag-canvas", enable: true },
   { type: "zoom-canvas", sensitivity: 1.4 },

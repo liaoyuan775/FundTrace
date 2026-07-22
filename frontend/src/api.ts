@@ -95,6 +95,11 @@ export const createVersion = (id: string, name: string) =>
 export const listSeeds = (id: string) => json<Seed[]>(`/api/cases/${id}/seeds`);
 export const createSeed = (id: string, value: unknown) =>
   json<Seed>(`/api/cases/${id}/seeds`, body(value));
+export const deleteSeed = (id: string, seedId: string) =>
+  json<{ seed_id: string; status: string }>(
+    `/api/cases/${id}/seeds/${seedId}`,
+    { method: "DELETE" },
+  );
 export const getGraph = (id: string, filters: Filters) =>
   json<GraphData>(`/api/cases/${id}/analysis/graph?${params(filters)}`);
 export const getAttribution = (

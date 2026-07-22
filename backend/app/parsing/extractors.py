@@ -12,6 +12,9 @@ from docx import Document
 from PIL import Image
 
 
+DOCX_TABLE_DATA_ROWS_PER_CHUNK = 8
+
+
 class UnsafeArchiveError(ValueError):
     pass
 
@@ -120,18 +123,26 @@ def extract_material(path: Path, rar_executable: str = "") -> list[dict]:
         )
         for table_index, table in enumerate(doc.tables):
             row_texts = ["\t".join(cell.text for cell in row.cells) for row in table.rows]
-            text = "\n".join(row_texts)
-            if text.strip():
-                chunks.append(
-                    {
-                        "text": text,
-                        "table_number": table_index + 1,
-                        "row_evidence": [
-                            {"row_number": row_number, "text": row_text}
-                            for row_number, row_text in enumerate(row_texts[1:], start=2)
-                        ],
-                    }
-                )
+            if not row_texts:
+                continue
+            row_evidence = [
+                {"row_number": row_number, "text": row_text}
+                for row_number, row_text in enumerate(row_texts[1:], start=2)
+            ]
+            evidence_chunks = [
+                row_evidence[index : index + DOCX_TABLE_DATA_ROWS_PER_CHUNK]
+                for index in range(0, len(row_evidence), DOCX_TABLE_DATA_ROWS_PER_CHUNK)
+            ] or [[]]
+            for chunk_evidence in evidence_chunks:
+                text = "\n".join([row_texts[0], *(item["text"] for item in chunk_evidence)])
+                if text.strip():
+                    chunks.append(
+                        {
+                            "text": text,
+                            "table_number": table_index + 1,
+                            "row_evidence": chunk_evidence,
+                        }
+                    )
     elif suffix == ".pdf":
         with fitz.open(path) as doc:
             chunks = [

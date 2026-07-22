@@ -5,6 +5,28 @@ from ..models import AttributionEdge, AttributionResult, TransactionRecord
 
 
 RISK_KEYWORDS = ("涉诈", "博彩", "虚假", "资金拆分", "任务佣金", "跑分", "洗钱")
+EXIT_KEYWORDS = ("取现", "ATM", "商户", "支付", "数字资产", "境外")
+NON_CANONICAL_RELATIONS = {"same_business_event", "corroborates"}
+
+
+def topology_records(records: list[TransactionRecord]) -> list[TransactionRecord]:
+    """Return only confirmed, successful money movements suitable for graphing."""
+    return [
+        record
+        for record in canonical_records(records)
+        if record.review_status == "confirmed"
+        and record.event_status in {"success", "returned"}
+        and record.relation_type not in NON_CANONICAL_RELATIONS
+        and record.amount > 0
+        and _endpoint(record, "payer")
+        and _endpoint(record, "payee")
+    ]
+
+
+def _endpoint(record: TransactionRecord, side: str) -> str:
+    endpoint_id = getattr(record, f"{side}_endpoint_id")
+    account = getattr(record, f"{side}_account")
+    return endpoint_id or account
 
 
 def _risk_factor(code: str, name: str, score: int, evidence: str) -> dict:
@@ -94,6 +116,70 @@ def score_account_risk(
     return {"score": score, "level": level, "factors": factors, "method": "internal_rules_v1"}
 
 
+def score_account_priority(
+    related: list[TransactionRecord],
+    incoming: list[TransactionRecord],
+    outgoing: list[TransactionRecord],
+    direct_victim_amount: float,
+    largest_direct_victim_amount: float,
+) -> dict:
+    factors = []
+    if direct_victim_amount:
+        factors.append(
+            _risk_factor(
+                "direct_victim_receiver",
+                "直接承接受害人付款",
+                30,
+                f"已确认直接收款 {direct_victim_amount:,.0f} 元",
+            )
+        )
+        amount_score = max(
+            1, round(10 * direct_victim_amount / largest_direct_victim_amount)
+        )
+        factors.append(
+            _risk_factor(
+                "victim_fund_scale",
+                "被害资金规模",
+                amount_score,
+                f"相对本案最大直接收款占比 {direct_victim_amount / largest_direct_victim_amount:.0%}",
+            )
+        )
+    upstream_accounts = {record.payer_account for record in incoming}
+    if len(upstream_accounts) >= 4:
+        factors.append(_risk_factor("aggregation", "多源资金汇聚", 15, f"上游账户 {len(upstream_accounts)} 个"))
+    elif len(upstream_accounts) >= 2:
+        factors.append(_risk_factor("aggregation", "多源资金汇聚", 8, f"上游账户 {len(upstream_accounts)} 个"))
+    rapid_count = count_rapid_transfers(incoming, outgoing)
+    if rapid_count >= 3:
+        factors.append(_risk_factor("rapid_transfer", "快速过账", 15, f"30分钟内转出 {rapid_count} 组"))
+    elif rapid_count:
+        factors.append(_risk_factor("rapid_transfer", "快速过账", 8, f"30分钟内转出 {rapid_count} 组"))
+    if has_split_transfer(outgoing):
+        factors.append(_risk_factor("split_transfer", "短时分拆", 10, "60分钟内向至少3个下游转出"))
+    counterparties = {record.payer_account for record in incoming} | {record.payee_account for record in outgoing}
+    if len(counterparties) >= 6:
+        factors.append(_risk_factor("topology_centrality", "链路交汇", 10, f"关联上下游账户 {len(counterparties)} 个"))
+    elif len(counterparties) >= 4:
+        factors.append(_risk_factor("topology_centrality", "链路交汇", 5, f"关联上下游账户 {len(counterparties)} 个"))
+    return_records = [record for record in related if "回流" in record.summary]
+    if return_records:
+        factors.append(_risk_factor("return_flow", "资金回流", 10, f"发现回流流水 {len(return_records)} 笔"))
+    exit_records = [
+        record
+        for record in outgoing
+        if any(keyword in f"{record.summary} {record.channel} {record.payee_name}" for keyword in EXIT_KEYWORDS)
+    ]
+    if exit_records:
+        factors.append(_risk_factor("exit_channel", "高风险出口", 10, f"流向取现、商户或支付出口 {len(exit_records)} 笔"))
+    score = min(100, sum(factor["score"] for factor in factors))
+    level = (
+        "一级重点" if score >= 70 else
+        "二级重点" if score >= 40 else
+        "三级关注" if score >= 20 else "常规节点"
+    )
+    return {"score": score, "level": level, "factors": factors}
+
+
 def build_graph(
     records: list[TransactionRecord],
     query: str = "",
@@ -104,8 +190,9 @@ def build_graph(
     region: str = "",
     date_from: str = "",
     date_to: str = "",
+    victim_accounts: set[str] | None = None,
 ) -> dict:
-    records = canonical_records(records)
+    records = topology_records(records)
     query = query.lower().strip()
     filtered = [
         t for t in records
@@ -125,24 +212,32 @@ def build_graph(
     outgoing_records = defaultdict(list)
     incoming = defaultdict(float)
     outgoing = defaultdict(float)
+    direct_victim_amounts = defaultdict(float)
+    victim_accounts = victim_accounts or set()
     for t in filtered:
-        incoming[t.payee_account] += t.amount
-        outgoing[t.payer_account] += t.amount
-        related_by_account[t.payer_account].append(t)
-        related_by_account[t.payee_account].append(t)
-        incoming_records[t.payee_account].append(t)
-        outgoing_records[t.payer_account].append(t)
+        payer_id = _endpoint(t, "payer")
+        payee_id = _endpoint(t, "payee")
+        incoming[payee_id] += t.amount
+        outgoing[payer_id] += t.amount
+        if t.payer_account in victim_accounts:
+            direct_victim_amounts[payee_id] += t.amount
+        related_by_account[payer_id].append(t)
+        related_by_account[payee_id].append(t)
+        incoming_records[payee_id].append(t)
+        outgoing_records[payer_id].append(t)
         for account, name, bank in (
-            (t.payer_account, t.payer_name, t.payer_bank),
-            (t.payee_account, t.payee_name, t.payee_bank),
+            (payer_id, t.payer_name, t.payer_bank),
+            (payee_id, t.payee_name, t.payee_bank),
         ):
-            nodes.setdefault(account, {"id": account, "label": name or account, "account": account, "bank": bank, "incoming": 0, "outgoing": 0, "risk": 0})
-        key = f"{t.payer_account}>{t.payee_account}"
-        edge = edge_map.setdefault(key, {"id": key, "source": t.payer_account, "target": t.payee_account, "amount": 0, "count": 0, "transaction_ids": [], "first_transaction_time": t.transaction_time.isoformat()})
+            entity_type = t.payer_entity_type if account == payer_id else t.payee_entity_type
+            nodes.setdefault(account, {"id": account, "label": name or account, "account": account, "bank": bank, "entity_type": entity_type, "incoming": 0, "outgoing": 0, "risk": 0})
+        key = f"{payer_id}>{payee_id}"
+        edge = edge_map.setdefault(key, {"id": key, "source": payer_id, "target": payee_id, "amount": 0, "count": 0, "transaction_ids": [], "first_transaction_time": t.transaction_time.isoformat()})
         edge["amount"] += t.amount
         edge["count"] += 1
         edge["transaction_ids"].append(t.transaction_id)
         edge["first_transaction_time"] = min(edge["first_transaction_time"], t.transaction_time.isoformat())
+    largest_direct_victim_amount = max(direct_victim_amounts.values(), default=0)
     for account, node in nodes.items():
         node["incoming"] = incoming[account]
         node["outgoing"] = outgoing[account]
@@ -150,6 +245,16 @@ def build_graph(
         node["risk"] = assessment["score"]
         node["risk_level"] = assessment["level"]
         node["risk_factors"] = assessment["factors"]
+        priority = score_account_priority(
+            related_by_account[account],
+            incoming_records[account],
+            outgoing_records[account],
+            direct_victim_amounts[account],
+            largest_direct_victim_amount,
+        )
+        node["priority_score"] = priority["score"]
+        node["priority_level"] = priority["level"]
+        node["priority_factors"] = priority["factors"]
     highest = max(nodes.values(), key=lambda item: item["risk"], default=None)
     risk_summary = {
         "score": highest["risk"] if highest else 0,

@@ -17,6 +17,15 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_prefix="", extra="ignore")
 
     def model_post_init(self, __context):
+        """
+        模型初始化后的后处理函数，用于处理环境变量并设置模型字段。
+        该函数会检查一系列预定义的环境变量别名，如果环境变量存在且对应的模型字段未被设置，
+        则将该环境变量的值赋给模型字段。如果字段是"data_dir"，则将值转换为Path对象。
+        参数:
+            self: 模型实例
+            __context: 初始化上下文（未使用）
+        """
+        # 定义环境变量与模型字段的映射关系
         aliases = {
             "FUNDTRACE_DATA_DIR": "data_dir",
             "QWEN_BASE_URL": "qwen_base_url",
@@ -24,13 +33,16 @@ class Settings(BaseSettings):
             "QWEN_MODEL": "qwen_model",
             "RAR_EXECUTABLE": "rar_executable",
         }
+        # 导入os模块以访问环境变量
         import os
+        # 遍历环境变量与字段的映射关系
         for env, field in aliases.items():
+            # 检查环境变量是否存在且字段未被设置
             if os.getenv(env) and field not in self.model_fields_set:
+                # 如果是data_dir字段，将值转换为Path对象；否则直接使用环境变量值
                 object.__setattr__(self, field, Path(os.getenv(env)) if field == "data_dir" else os.getenv(env))
 
 
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
-

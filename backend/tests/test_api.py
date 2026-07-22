@@ -32,6 +32,42 @@ def test_demo_bootstrap_has_complex_graph(tmp_path):
     assert len(graph["edges"]) >= 60
 
 
+def test_graph_marks_direct_victim_receiver_as_priority(tmp_path):
+    api = client(tmp_path)
+    case = api.post(
+        "/api/cases",
+        json={
+            "name": "重点拓扑案",
+            "case_number": "PRIORITY-1",
+            "victims": [
+                {"name": "受害人甲", "accounts": ["V"], "reported_loss": 1000}
+            ],
+        },
+    ).json()
+    api.post(
+        f"/api/cases/{case['case_id']}/draft-transactions",
+        json={
+            "transaction_id": "T1",
+            "transaction_time": "2026-07-22T10:00:00",
+            "payer_account": "V",
+            "payer_name": "受害人甲",
+            "payee_account": "A",
+            "payee_name": "一级收款",
+            "amount": 1000,
+            "review_status": "confirmed",
+        },
+    )
+
+    graph = api.get(f"/api/cases/{case['case_id']}/analysis/graph").json()
+    node = next(item for item in graph["nodes"] if item["id"] == "A")
+
+    assert node["priority_level"] in {"一级重点", "二级重点"}
+    assert any(
+        item["code"] == "direct_victim_receiver"
+        for item in node["priority_factors"]
+    )
+
+
 def test_demo_graph_entities_are_account_holders_not_scam_scenarios():
     forbidden = ("入金池", "收款池", "退款池", "任务池")
     names = {
@@ -41,6 +77,111 @@ def test_demo_graph_entities_are_account_holders_not_scam_scenarios():
     }
 
     assert not [name for name in names if any(word in name for word in forbidden)]
+
+
+def test_confirmed_records_gate_formal_analysis(tmp_path):
+    api = client(tmp_path)
+    case_id = api.post(
+        "/api/cases",
+        json={"name": "确认门槛案", "case_number": "GATE-1", "victims": []},
+    ).json()["case_id"]
+    confirmed = {
+        "transaction_id": "T-CONFIRMED",
+        "transaction_time": "2026-07-21T10:00:00",
+        "serial_number": "S-1",
+        "payer_account": "A",
+        "payer_name": "甲",
+        "payee_account": "B",
+        "payee_name": "乙",
+        "amount": 1000,
+        "review_status": "confirmed",
+    }
+    pending = {
+        **confirmed,
+        "transaction_id": "T-PENDING",
+        "serial_number": "S-2",
+        "payer_account": "B",
+        "payer_name": "乙",
+        "payee_account": "C",
+        "payee_name": "丙",
+        "amount": 800,
+        "review_status": "pending",
+    }
+    assert api.post(f"/api/cases/{case_id}/draft-transactions", json=confirmed).status_code == 201
+    assert api.post(f"/api/cases/{case_id}/draft-transactions", json=pending).status_code == 201
+
+    graph = api.get(f"/api/cases/{case_id}/analysis/graph").json()
+    trace = api.get(f"/api/cases/{case_id}/analysis/trace?start=A&end=C").json()
+    path = api.get(f"/api/cases/{case_id}/analysis/path?start=A&end=C").json()
+    attribution = api.post(
+        f"/api/cases/{case_id}/analysis/attribute?source_account=B&victim_amount=800"
+    ).json()
+
+    assert graph["transaction_count"] == 1
+    assert [edge["id"] for edge in graph["edges"]] == ["A>B"]
+    assert trace["downstream"] == ["A", "B"]
+    assert trace["shortest_path"] == []
+    assert path["path"] == []
+    assert attribution["fifo"]["edges"] == []
+
+
+def test_seed_requires_confirmed_payment_from_selected_victim_account(tmp_path):
+    api = client(tmp_path)
+    case = api.post(
+        "/api/cases",
+        json={
+            "name": "起点校验案",
+            "case_number": "SEED-1",
+            "victims": [{"name": "受害人甲", "accounts": ["62170001"], "reported_loss": 50000}],
+        },
+    ).json()
+    case_id = case["case_id"]
+    victim_id = case["victims"][0]["victim_id"]
+    payment = {
+        "transaction_id": "T-VICTIM",
+        "transaction_time": "2026-07-21T10:00:00",
+        "serial_number": "S-VICTIM",
+        "payer_account": "62170001",
+        "payer_name": "受害人甲",
+        "payee_account": "62280001",
+        "payee_name": "收款人",
+        "amount": 50000,
+        "review_status": "pending",
+    }
+    other_payment = {
+        **payment,
+        "transaction_id": "T-OTHER",
+        "serial_number": "S-OTHER",
+        "payer_account": "62179999",
+        "review_status": "confirmed",
+    }
+    api.post(f"/api/cases/{case_id}/draft-transactions", json=payment)
+    api.post(f"/api/cases/{case_id}/draft-transactions", json=other_payment)
+    seed = {"victim_id": victim_id, "amount": 50000, "confirmed_by": "办案人员"}
+
+    pending_response = api.post(
+        f"/api/cases/{case_id}/seeds", json={**seed, "transaction_id": "T-VICTIM"}
+    )
+    wrong_payer_response = api.post(
+        f"/api/cases/{case_id}/seeds", json={**seed, "transaction_id": "T-OTHER"}
+    )
+    api.patch(
+        f"/api/cases/{case_id}/draft-transactions/T-VICTIM",
+        json={"review_status": "confirmed", "review_note": "已核对"},
+    )
+    accepted = api.post(
+        f"/api/cases/{case_id}/seeds", json={**seed, "transaction_id": "T-VICTIM"}
+    )
+    cancelled = api.delete(
+        f"/api/cases/{case_id}/seeds/{accepted.json()['seed_id']}"
+    )
+
+    assert pending_response.status_code == 409
+    assert wrong_payer_response.status_code == 409
+    assert "付款账号" in wrong_payer_response.json()["detail"]
+    assert accepted.status_code == 201
+    assert cancelled.status_code == 200
+    assert api.get(f"/api/cases/{case_id}/seeds").json() == []
 
 
 def test_duplicate_material_is_identified_by_hash(tmp_path):

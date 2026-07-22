@@ -31,4 +31,14 @@ describe("graph interaction states", () => {
     expect(states.nodes.A).toEqual(["playing-target"]);
     expect(states.nodes.B).toEqual(["inactive"]);
   });
+
+  test("edge focus replaces an existing node focus", () => {
+    const states = buildFocusStates(graph, "A", "B>D", null);
+
+    expect(states.edges["B>D"]).toEqual(["selected"]);
+    expect(states.nodes.B).toEqual(["edge-endpoint"]);
+    expect(states.nodes.D).toEqual(["edge-endpoint"]);
+    expect(states.nodes.A).toEqual(["inactive"]);
+    expect(states.edges["A>B"]).toEqual(["inactive"]);
+  });
 });

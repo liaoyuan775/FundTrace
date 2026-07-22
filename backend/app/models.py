@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 ReviewStatus = Literal["pending", "confirmed", "rejected", "conflict"]
@@ -41,6 +41,7 @@ class SourceLocation(BaseModel):
 
 class TransactionRecord(BaseModel):
     transaction_id: str = Field(default_factory=lambda: f"TX-{uuid4().hex[:12].upper()}")
+    record_type: str = "bank_transfer"
     transaction_time: datetime
     serial_number: str = ""
     payer_account: str
@@ -51,6 +52,10 @@ class TransactionRecord(BaseModel):
     payee_name: str
     payee_institution: str = ""
     payee_bank: str = ""
+    payer_entity_type: str = "bank_account"
+    payee_entity_type: str = "bank_account"
+    payer_endpoint_id: str | None = None
+    payee_endpoint_id: str | None = None
     debit_credit: str = "借"
     currency: str = "CNY"
     amount: float = Field(gt=0)
@@ -60,6 +65,7 @@ class TransactionRecord(BaseModel):
     region: str = ""
     transaction_type: str = "转账"
     source: SourceLocation = Field(default_factory=SourceLocation)
+    evidence_locations: list[SourceLocation] = Field(default_factory=list)
     parser_name: str = "manual"
     model_id: str | None = None
     prompt_version: str | None = None
@@ -68,6 +74,16 @@ class TransactionRecord(BaseModel):
     review_note: str = ""
     duplicate_group: str | None = None
     conflict_status: str | None = None
+    event_status: str = "success"
+    order_id: str | None = None
+    batch_id: str | None = None
+    merchant_id: str | None = None
+    merchant_name: str | None = None
+    terminal_id: str | None = None
+    authorization_code: str | None = None
+    fee: float | None = None
+    related_transaction_id: str | None = None
+    relation_type: str | None = None
     provenance: Literal["original", "human_confirmed", "rule_computed", "model_suggested"] = "model_suggested"
 
     @field_validator("transaction_time", mode="after")
@@ -82,6 +98,12 @@ class TransactionRecord(BaseModel):
     @classmethod
     def clean_account(cls, value: str) -> str:
         return "".join(ch for ch in value if ch.isalnum())
+
+    @model_validator(mode="after")
+    def retain_primary_evidence(self):
+        if not self.evidence_locations and self.source.source_file_id:
+            self.evidence_locations = [self.source.model_copy(deep=True)]
+        return self
 
 
 class DraftUpdate(BaseModel):

@@ -1,9 +1,14 @@
 import argparse
 import json
 import mimetypes
+import sys
 from collections import Counter, defaultdict
 from datetime import datetime
 from pathlib import Path
+
+BACKEND_DIR = Path(__file__).resolve().parents[1] / "backend"
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
 
 from fastapi.testclient import TestClient
 
@@ -18,6 +23,7 @@ CRITICAL_FIELDS = (
     "payer_name",
     "payee_account",
     "payee_name",
+    "currency",
     "amount",
     "channel",
 )
@@ -44,6 +50,16 @@ def _write_report(output_dir: Path, report: dict) -> None:
         f"- 唯一交易：{report['canonical_count']} / 120",
         f"- 重复组：{report['duplicate_group_count']} / 15",
         f"- 误识别记录：{report['false_positive_count']}",
+        "",
+        "## 模型能力预检",
+        "",
+        f"- 已启用：{report['model_capability']['enabled']}",
+        f"- 可达：{report['model_capability']['reachable']}",
+        f"- 文本 JSON：{report['model_capability']['text_json']}",
+        f"- 图片预检：{report['model_capability']['vision_preflight']}",
+        f"- 图片已尝试：{report['model_capability']['vision_attempted']}",
+        f"- 图片有效成功：{report['model_capability']['vision']}",
+        f"- 探测信息：{report['model_capability']['message']}",
         "",
         "## 各格式准确率",
         "",
@@ -90,6 +106,8 @@ def run(output_dir: Path, data_dir: Path) -> dict:
     data_dir.mkdir(parents=True, exist_ok=True)
     settings = Settings(data_dir=data_dir)
     app = create_app(settings)
+    adapter = app.state.qwen
+    preflight_capability = adapter.probe()
     client = TestClient(app)
     case = client.post(
         "/api/cases",
@@ -132,6 +150,21 @@ def run(output_dir: Path, data_dir: Path) -> dict:
             f"错误 {result['error_count']}，警告 {result['warning_count']}",
             flush=True,
         )
+
+    effective_capability = adapter.probe()
+    model_capability = {
+        "enabled": adapter.enabled,
+        "reachable": effective_capability.reachable,
+        "text_json": effective_capability.text_json,
+        "vision_preflight": preflight_capability.vision,
+        "vision_attempted": getattr(
+            effective_capability,
+            "vision_attempted",
+            getattr(adapter, "vision_attempted", effective_capability.vision),
+        ),
+        "vision": effective_capability.vision,
+        "message": effective_capability.message,
+    }
 
     # The oracle is read only after every material has been parsed. It is never
     # uploaded, copied into the case, or passed to the extraction model.
@@ -209,6 +242,15 @@ def run(output_dir: Path, data_dir: Path) -> dict:
         return bool(source.get("archive_member_path"))
 
     evidence_count = sum(has_evidence(record) for record in drafts)
+    confirm_response = client.post(f"/api/cases/{case_id}/draft-transactions/confirm-all")
+    confirm_response.raise_for_status()
+    version_response = client.post(
+        f"/api/cases/{case_id}/versions", json={"name": "多来源解析确认版"}
+    )
+    version_record_count = None
+    if version_response.status_code == 201:
+        version_record_count = version_response.json()["record_count"]
+
     graph_response = client.get(f"/api/cases/{case_id}/analysis/graph")
     graph_response.raise_for_status()
     graph = graph_response.json()
@@ -219,15 +261,6 @@ def run(output_dir: Path, data_dir: Path) -> dict:
         "total_amount": round(graph["total_amount"], 2),
     }
     expected_graph = truth["expected_graph"]
-
-    confirm_response = client.post(f"/api/cases/{case_id}/draft-transactions/confirm-all")
-    confirm_response.raise_for_status()
-    version_response = client.post(
-        f"/api/cases/{case_id}/versions", json={"name": "多来源解析确认版"}
-    )
-    version_record_count = None
-    if version_response.status_code == 201:
-        version_record_count = version_response.json()["record_count"]
 
     failures = []
     if len(uploads) != 10:
@@ -267,6 +300,7 @@ def run(output_dir: Path, data_dir: Path) -> dict:
         "evidence_location_count": evidence_count,
         "version_record_count": version_record_count,
         "false_positive_count": false_positive_count,
+        "model_capability": model_capability,
         "format_metrics": dict(format_metrics),
         "graph": {"actual": actual_graph, "expected": expected_graph},
         "materials": material_results,
